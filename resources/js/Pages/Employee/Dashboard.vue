@@ -38,6 +38,7 @@ const implementedEmployeePages = new Set([
     'emp-idp-detail',
     'emp-fc-topic-approval',
     'emp-assessment-review',
+    'emp-team-assessment',
     'emp-idp-review',
 ]);
 
@@ -72,6 +73,7 @@ const currentRoleData = computed(() => ROLES_CONFIG[currentRole.value]);
 const currentPageTitle = computed(() => ({
     'emp-fc-topic-approval': 'พิจารณาหัวข้อการประเมิน',
     'emp-assessment-review': 'อนุมัติการประเมิน',
+    'emp-team-assessment': 'ผลการประเมินของทีม',
     'emp-idp-review': 'อนุมัติแผนและผล IDP',
 }[activePage.value] || PAGE_TITLES[activePage.value] || props.pageTitle));
 const serverCurrentUser = computed(() => page.props.currentUser || null);
@@ -86,6 +88,9 @@ const employeeNavSections = computed(() => {
     const assignedItems = [
         ...((fcTopicApprovalModule.value.enabled || assessmentApprovalModule.value.enabled)
             ? [{ id: 'emp-assessment-review', ic: '', lb: 'อนุมัติการประเมิน' }]
+            : []),
+        ...(assessmentApprovalModule.value.enabled
+            ? [{ id: 'emp-team-assessment', ic: '', lb: 'ผลการประเมินของทีม' }]
             : []),
         ...(idpReviewModule.value.enabled
             ? [{ id: 'emp-idp-review', ic: '', lb: 'อนุมัติแผนและผล IDP' }]
@@ -251,6 +256,14 @@ const logout = () => router.post(route('logout'));
                     v-else-if="activePage === 'emp-assessment-review' && (fcTopicApprovalModule.enabled || assessmentApprovalModule.enabled)"
                     embedded
                     embedded-page="dh-assess"
+                    role-key="employee"
+                    :idp-review-items="page.props.idpReviewItems || []"
+                />
+
+                <HeadDashboard
+                    v-else-if="activePage === 'emp-team-assessment' && assessmentApprovalModule.enabled"
+                    embedded
+                    embedded-page="sup-gap"
                     role-key="employee"
                     :idp-review-items="page.props.idpReviewItems || []"
                 />

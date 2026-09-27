@@ -1,18 +1,14 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Head, router, useForm } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import SidebarBrand from '../../Components/SidebarBrand.vue';
 import PageTitleBlock from '../../Components/PageTitleBlock.vue';
-import { NAV_CONFIG, PAGE_TITLES, ROLES_CONFIG } from '../../data';
+import { NAV_CONFIG, ROLES_CONFIG } from '../../data';
 
 const props = defineProps({
     profileUser: {
         type: Object,
         required: true,
-    },
-    status: {
-        type: String,
-        default: '',
     },
     pageTitle: {
         type: String,
@@ -20,9 +16,7 @@ const props = defineProps({
     },
 });
 
-const isEditing = ref(false);
 const showSidebar = ref(true);
-const photoInput = ref(null);
 const normalizeRoleKey = (role) => role === 'manager_dept' ? 'dept_head' : role;
 
 const roleKey = computed(() => normalizeRoleKey(props.profileUser?.r || 'employee'));
@@ -33,84 +27,30 @@ const navSections = computed(() => {
     return NAV_CONFIG[roleKey.value] || NAV_CONFIG.employee || [];
 });
 const fullName = computed(() =>
-    `${form.title || ''}${form.first_name_th || ''} ${form.last_name_th || ''}`.trim()
+    `${props.profileUser?.t || ''}${props.profileUser?.fn || ''} ${props.profileUser?.ln || ''}`.trim()
     || props.profileUser?.n
     || 'โปรไฟล์บุคลากร',
 );
 const roleLine = computed(() =>
-    [form.position, form.level, form.department].filter(Boolean).join(' · ') || 'ยังไม่ได้ระบุข้อมูลตำแหน่ง',
+    [props.profileUser?.p, props.profileUser?.l, props.profileUser?.d].filter(Boolean).join(' · ') || 'ยังไม่ได้ระบุข้อมูลตำแหน่ง',
 );
 
-const form = useForm({
-    sso: props.profileUser?.sso || '',
-    title: props.profileUser?.t || '',
-    name: props.profileUser?.n || '',
-    first_name_th: props.profileUser?.fn || '',
-    last_name_th: props.profileUser?.ln || '',
-    first_name_en: props.profileUser?.fe || '',
-    last_name_en: props.profileUser?.le || '',
-    email: props.profileUser?.em || '',
-    phone: props.profileUser?.ph || '',
-    workline: props.profileUser?.w || '',
-    department: props.profileUser?.d || '',
-    position: props.profileUser?.p || '',
-    level: props.profileUser?.l || '',
-    profile_photo: props.profileUser?.photo || '',
-});
-
 const fieldGroups = computed(() => [
-    { key: 'sso', label: 'ID', readonly: true },
-    { key: 'title', label: 'คำนำหน้า', required: true },
-    { key: 'first_name_th', label: 'ชื่อ (ภาษาไทย)', required: true },
-    { key: 'last_name_th', label: 'นามสกุล (ภาษาไทย)', required: true },
-    { key: 'first_name_en', label: 'First Name', required: true },
-    { key: 'last_name_en', label: 'Last Name', required: true },
-    { key: 'email', label: 'อีเมล', type: 'email' },
-    { key: 'phone', label: 'เบอร์โทรศัพท์' },
-    { key: 'department', label: 'สังกัด/หน่วยงาน', readonly: true },
+    { key: 'sso', label: 'ID', value: props.profileUser?.sso },
+    { key: 'title', label: 'คำนำหน้า', value: props.profileUser?.t },
+    { key: 'first_name_th', label: 'ชื่อ (ภาษาไทย)', value: props.profileUser?.fn },
+    { key: 'last_name_th', label: 'นามสกุล (ภาษาไทย)', value: props.profileUser?.ln },
+    { key: 'first_name_en', label: 'First Name', value: props.profileUser?.fe },
+    { key: 'last_name_en', label: 'Last Name', value: props.profileUser?.le },
+    { key: 'email', label: 'อีเมล', value: props.profileUser?.em },
+    { key: 'phone', label: 'เบอร์โทรศัพท์', value: props.profileUser?.ph },
+    { key: 'department', label: 'สังกัด/หน่วยงาน', value: props.profileUser?.d },
 ]);
 
-const displayValue = (field) => field.value ?? form[field.key] ?? '';
 const goDashboard = (pageId) => {
     router.visit(`${route('dashboard')}?page=${encodeURIComponent(pageId)}`);
 };
 const logout = () => router.post(route('logout'));
-
-const cancelEdit = () => {
-    form.reset();
-    form.clearErrors();
-    isEditing.value = false;
-};
-
-const choosePhoto = () => {
-    photoInput.value?.click();
-};
-
-const updatePhoto = (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-
-    if (!file || !file.type.startsWith('image/')) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-        form.profile_photo = String(reader.result || '');
-    };
-    reader.readAsDataURL(file);
-};
-
-const removePhoto = () => {
-    form.profile_photo = '';
-};
-
-const saveProfile = () => {
-    form.patch(route('profile.update'), {
-        preserveScroll: true,
-        onSuccess: () => {
-            isEditing.value = false;
-        },
-    });
-};
 </script>
 
 <template>
@@ -126,7 +66,7 @@ const saveProfile = () => {
                 </div>
                 <div style="overflow: hidden; min-width: 0">
                     <div class="u-name">{{ fullName }}</div>
-                    <div class="u-role">{{ form.position || roleData.pos }}</div>
+                    <div class="u-role">{{ props.profileUser?.p || roleData.pos }}</div>
                 </div>
             </button>
 
@@ -156,101 +96,48 @@ const saveProfile = () => {
                 </button>
             </div>
 
-            <form class="content profile-page" @submit.prevent="saveProfile">
+            <div class="content profile-page">
                 <section class="profile-hero card">
                     <div class="profile-identity">
                         <div class="profile-photo-block">
-                        <div class="profile-avatar">
-                            <img
-                                v-if="form.profile_photo"
-                                :src="form.profile_photo"
-                                :alt="fullName"
-                            />
-                            <span v-else>{{ fullName[0] || roleData.av }}</span>
-                        </div>
-                        <div v-if="isEditing" class="photo-actions">
-                            <input
-                                ref="photoInput"
-                                type="file"
-                                accept="image/*"
-                                class="photo-input"
-                                @change="updatePhoto"
-                            />
-                            <button class="btn btn-s btn-sm" type="button" @click="choosePhoto">
-                                {{ form.profile_photo ? 'เปลี่ยนรูป' : 'เพิ่มรูป' }}
-                            </button>
-                        </div>
+                            <div class="profile-avatar">
+                                <img
+                                    v-if="props.profileUser?.photo"
+                                    :src="props.profileUser.photo"
+                                    :alt="fullName"
+                                />
+                                <span v-else>{{ fullName[0] || roleData.av }}</span>
+                            </div>
                         </div>
                         <div class="profile-heading">
                             <div class="sec-t">โปรไฟล์บุคลากร</div>
                             <h1>{{ fullName }}</h1>
                             <p>{{ roleLine }}</p>
                             <div class="profile-tags">
-                                <span>ID {{ form.sso || '—' }}</span>
-                                <span>{{ form.workline || 'ยังไม่ได้ระบุสายงาน' }}</span>
+                                <span>ID {{ props.profileUser?.sso || '—' }}</span>
+                                <span>{{ props.profileUser?.w || 'ยังไม่ได้ระบุสายงาน' }}</span>
                             </div>
                         </div>
                     </div>
 
-                    <div class="profile-actions">
-                        <template v-if="isEditing">
-                            <button class="btn btn-s" type="button" @click="cancelEdit">ยกเลิก</button>
-                            <button class="profile-primary-btn" type="submit" :disabled="form.processing">
-                                {{ form.processing ? 'กำลังบันทึก...' : 'บันทึกโปรไฟล์' }}
-                            </button>
-                        </template>
-                        <button v-else class="profile-primary-btn" type="button" @click="isEditing = true">
-                            แก้ไขโปรไฟล์
-                        </button>
+                    <div class="profile-admin-notice" role="note">
+                        <strong>ข้อมูลโปรไฟล์แก้ไขได้โดยผู้ดูแลระบบเท่านั้น</strong>
+                        <span>หากข้อมูลไม่ถูกต้องหรือต้องการแก้ไข กรุณาติดต่อ Admin</span>
                     </div>
                 </section>
 
                 <section class="profile-section card">
                     <div class="fw8 fs14">ข้อมูลบุคลากร</div>
-                    <div v-if="status" class="profile-status">{{ status }}</div>
-
-                    <div class="profile-grid" :class="{ editing: isEditing }">
+                    <div class="profile-grid">
                         <div v-for="field in fieldGroups" :key="field.key" class="profile-field">
-                            <label class="lbl">
-                                {{ field.label }} <span v-if="field.required" class="required">*</span>
-                            </label>
-
-                            <template v-if="isEditing">
-                                <select
-                                    v-if="field.type === 'select'"
-                                    v-model="form[field.key]"
-                                    class="sel"
-                                    :disabled="field.readonly"
-                                >
-                                    <option
-                                        v-for="option in field.options"
-                                        :key="option || 'empty'"
-                                        :value="option"
-                                    >
-                                        {{ option || '— เลือก —' }}
-                                    </option>
-                                </select>
-                                <input
-                                    v-else
-                                    v-model="form[field.key]"
-                                    class="inp"
-                                    :class="{ readonly: field.readonly }"
-                                    :readonly="field.readonly"
-                                    :type="field.type || 'text'"
-                                    placeholder="-"
-                                />
-                                <div v-if="form.errors[field.key]" class="field-error">
-                                    {{ form.errors[field.key] }}
-                                </div>
-                            </template>
-
-                            <div v-else class="profile-value">
-                                {{ displayValue(field) || '—' }}
+                            <div class="lbl">{{ field.label }}</div>
+                            <div class="profile-value">
+                                {{ field.value || '—' }}
                             </div>
                         </div>
                     </div>
                 </section>
-            </form>
+            </div>
         </main>
     </div>
 </template>
@@ -319,16 +206,6 @@ const saveProfile = () => {
     gap: 12px;
 }
 
-.photo-input {
-    display: none;
-}
-
-.photo-actions {
-    width: 132px;
-    display: flex;
-    justify-content: center;
-}
-
 .profile-heading {
     min-width: 0;
 }
@@ -369,58 +246,27 @@ const saveProfile = () => {
     font-weight: 800;
 }
 
-.profile-actions {
-    flex: 0 0 auto;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 8px;
-    max-width: 480px;
-}
-
-.profile-primary-btn {
-    min-height: 42px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 9px 18px;
-    border: 1px solid #1d4ed8;
+.profile-admin-notice {
+    box-sizing: border-box;
+    display: grid;
+    gap: 5px;
+    flex: 0 1 320px;
+    max-width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #cfe4dc;
     border-radius: var(--r);
-    background: var(--blue);
-    color: #fff;
-    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.24);
-    cursor: pointer;
-    font-family: inherit;
+    background: #f3fbf7;
+    color: #245447;
     font-size: 13px;
+    line-height: 1.5;
+}
+
+.profile-admin-notice strong {
     font-weight: 800;
-    line-height: 1.2;
-    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.15s;
-    white-space: nowrap;
-}
-
-.profile-primary-btn:hover {
-    border-color: #1e40af;
-    background: #1d4ed8;
-    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.32);
-    transform: translateY(-1px);
-}
-
-.profile-primary-btn:disabled {
-    opacity: 0.68;
-    cursor: not-allowed;
-    transform: none;
 }
 
 .profile-section {
     padding: 20px 24px;
-}
-
-.profile-status {
-    margin-top: 10px;
-    color: var(--green);
-    font-size: 13px;
-    font-weight: 700;
 }
 
 .profile-grid {
@@ -428,10 +274,6 @@ const saveProfile = () => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px 14px;
     margin-top: 14px;
-}
-
-.profile-grid.editing {
-    gap: 24px 16px;
 }
 
 .profile-field {
@@ -445,50 +287,11 @@ const saveProfile = () => {
     background: var(--bg);
 }
 
-.profile-grid.editing .profile-field {
-    min-height: 0;
-    display: block;
-    padding: 0;
-    border-left: 0;
-    border-radius: 0;
-    background: transparent;
-}
-
 .profile-value {
     color: var(--text);
     font-size: 14px;
     font-weight: 800;
     overflow-wrap: anywhere;
-}
-
-.profile-field :deep(.inp),
-.profile-field :deep(.sel) {
-    min-height: 36px;
-    padding-top: 6px;
-    padding-bottom: 6px;
-}
-
-.profile-grid.editing :deep(.inp),
-.profile-grid.editing :deep(.sel) {
-    min-height: 48px;
-    padding: 10px 14px;
-    font-size: 14px;
-}
-
-.required {
-    color: var(--red);
-}
-
-.readonly {
-    border-color: #dbe4f0;
-    background: #eef2f7;
-    cursor: not-allowed;
-}
-
-.field-error {
-    color: var(--red);
-    font-size: 12px;
-    font-weight: 700;
 }
 
 @media (max-width: 900px) {
@@ -512,9 +315,9 @@ const saveProfile = () => {
         font-size: 21px;
     }
 
-    .profile-actions {
+    .profile-admin-notice {
         width: 100%;
-        justify-content: flex-start;
+        flex-basis: auto;
     }
 
     .profile-grid {

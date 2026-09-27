@@ -221,6 +221,7 @@ export const PAGE_TITLES = {
   "mgr-idp-approval": "อนุมัติแผนและผล IDP",
   "admin-fc-topic-review": "พิจารณาหัวข้อการประเมิน",
   "admin-assessment-review": "อนุมัติการประเมิน",
+  "admin-team-assessment": "ผลการประเมินของทีม",
   "admin-idp-review": "อนุมัติแผนและผล IDP",
   "hr-cycle": "รอบการประเมิน",
   "hr-template": "กำหนดความคาดหวัง",

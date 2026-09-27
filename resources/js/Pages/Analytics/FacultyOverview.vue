@@ -455,7 +455,7 @@ onBeforeUnmount(() => {
         <select v-model.number="selectedRoundId" :disabled="isChangingRound || !rounds.length" @change="changeRound">
           <option v-if="!rounds.length" :value="null">ยังไม่มีรอบการประเมิน</option>
           <option v-for="round in rounds" :key="round.id" :value="round.id">
-            {{ round.name }} ({{ round.year }}){{ round.isActive ? ' · กำลังใช้งาน' : '' }}
+            {{ round.name }}{{ round.isActive ? ' · กำลังใช้งาน' : '' }}
           </option>
         </select>
         <small v-if="isChangingRound">กำลังโหลดข้อมูลรอบที่เลือก…</small>

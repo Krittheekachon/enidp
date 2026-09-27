@@ -92,9 +92,16 @@ class UserController extends Controller
 
     private function validatedData(Request $request, ?User $user = null): array
     {
+        $preserveExistingStructure = $user && $request->boolean('preserve_existing_structure');
         $request->merge([
             'r' => $this->normalizeRoleKey((string) $request->input('r', '')),
             'username' => Str::lower(trim((string) $request->input('username', ''))),
+            ...($preserveExistingStructure ? [
+                'w' => $user->workline,
+                'd' => $user->department,
+                'p' => $user->position,
+                'l' => $user->level,
+            ] : []),
         ]);
 
         $roleKeys = DB::table('roles')->pluck('key')->all();
@@ -133,11 +140,12 @@ class UserController extends Controller
                 Password::min(8),
             ],
             'ph' => ['nullable', 'regex:/^0\d{2}-\d{3}-\d{4}$/'],
-            'w' => [Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:120'],
-            'd' => [Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:255'],
-            'p' => [Rule::requiredIf(fn () => ! $this->allowsMissingPositionFields($request)), 'nullable', 'string', 'max:120'],
-            'l' => [Rule::requiredIf(fn () => ! $this->allowsMissingPositionFields($request)), 'nullable', 'string', 'max:120'],
+            'w' => [Rule::excludeIf($preserveExistingStructure), Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:120'],
+            'd' => [Rule::excludeIf($preserveExistingStructure), Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:255'],
+            'p' => [Rule::excludeIf($preserveExistingStructure), Rule::requiredIf(fn () => ! $this->allowsMissingPositionFields($request)), 'nullable', 'string', 'max:120'],
+            'l' => [Rule::excludeIf($preserveExistingStructure), Rule::requiredIf(fn () => ! $this->allowsMissingPositionFields($request)), 'nullable', 'string', 'max:120'],
             'r' => ['required', Rule::in($roleKeys)],
+            'preserve_existing_structure' => ['sometimes', 'boolean'],
             'reviewer_ids' => ['nullable', 'array'],
             'reviewer_ids.*' => ['nullable', 'integer', 'exists:users,id'],
             'reviewer_template_id' => ['nullable', 'integer'],
@@ -152,7 +160,16 @@ class UserController extends Controller
         $this->assertReviewerTemplateIsValid($data['reviewer_template_id'] ?? null, 'assessment', 'reviewer_template_id');
         $this->assertReviewerTemplateIsValid($data['idp_reviewer_template_id'] ?? null, 'idp', 'idp_reviewer_template_id');
 
-        $data = $this->validatedStructureData($data);
+        if ($preserveExistingStructure) {
+            $data['w'] = $user->workline;
+            $data['d'] = $user->department;
+            $data['p'] = $user->position;
+            $data['l'] = $user->level;
+            $data['_position_id'] = $user->position_id;
+            $data['_level_id'] = $user->level_id;
+        } else {
+            $data = $this->validatedStructureData($data);
+        }
         $data['reviewer_ids'] = $this->normalizeReviewerIds($data, $user, 'reviewer_ids', 'reviewer_template_id', 'assessment');
         $data['idp_reviewer_ids'] = $this->normalizeReviewerIds($data, $user, 'idp_reviewer_ids', 'idp_reviewer_template_id', 'idp');
         if ($data['idp_reviewer_ids'] === [] && blank($data['idp_reviewer_template_id'] ?? null)) {

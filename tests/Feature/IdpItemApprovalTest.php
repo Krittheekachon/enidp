@@ -51,6 +51,24 @@ class IdpItemApprovalTest extends TestCase
         ]);
     }
 
+    public function test_any_assigned_role_can_approve_an_idp_plan(): void
+    {
+        foreach (['employee', 'admin', 'hr', 'dean'] as $roleKey) {
+            $reviewer = User::factory()->create(['role_id' => $this->roleId($roleKey)]);
+            [, $itemId] = $this->submittedItem($reviewer);
+
+            $this->actingAs($reviewer)
+                ->post(route('idp-items.approve'), ['idpItemId' => $itemId])
+                ->assertSessionHasNoErrors();
+
+            $this->assertDatabaseHas('idp_items', [
+                'id' => $itemId,
+                'status' => 'approved',
+                'approved_by' => $reviewer->id,
+            ]);
+        }
+    }
+
     public function test_unassigned_user_cannot_approve_competency_plan(): void
     {
         [, $itemId] = $this->submittedItem();

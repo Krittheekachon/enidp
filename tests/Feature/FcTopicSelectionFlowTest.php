@@ -39,7 +39,7 @@ class FcTopicSelectionFlowTest extends TestCase
         DB::table('user_reviewer_steps')->insert([
             'user_id' => $employee->id,
             'reviewer_id' => $reviewer->id,
-            'step_order' => 1,
+            'step_order' => 3,
             'chain_type' => 'assessment',
             'created_at' => now(),
             'updated_at' => now(),
@@ -53,6 +53,65 @@ class FcTopicSelectionFlowTest extends TestCase
                 ->where('roleKey', 'employee')
                 ->where('fcTopicApprovalModule.enabled', true)
                 ->has('fcTopicApprovalModule.items', 0));
+    }
+
+    public function test_current_first_reviewer_can_take_over_a_submitted_fc_selection_after_chain_changes(): void
+    {
+        $roundId = DB::table('assessment_rounds')->insertGetId([
+            'name' => 'รอบเปลี่ยนผู้ตรวจ FC',
+            'year' => 2569,
+            'self_assess_start' => now()->subMonth()->toDateString(),
+            'self_assess_end' => now()->addMonth()->toDateString(),
+            'supervisor_assess_end' => now()->addMonths(2)->toDateString(),
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        [$positionId] = $this->positionWithCompetencies($roundId);
+        $previousReviewer = User::factory()->create(['role_id' => $this->roleId('supervisor')]);
+        $currentReviewer = User::factory()->create(['role_id' => $this->roleId('employee')]);
+        $employee = User::factory()->create([
+            'role_id' => $this->roleId('employee'),
+            'position_id' => $positionId,
+        ]);
+        DB::table('user_reviewer_steps')->insert([
+            'user_id' => $employee->id,
+            'reviewer_id' => $currentReviewer->id,
+            'step_order' => 2,
+            'chain_type' => 'assessment',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $selectionId = DB::table('fc_topic_selections')->insertGetId([
+            'assessment_round_id' => $roundId,
+            'user_id' => $employee->id,
+            'position_id' => $positionId,
+            'status' => 'submitted',
+            'submitted_to' => $previousReviewer->id,
+            'submitted_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($currentReviewer)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Employee/Dashboard')
+                ->where('fcTopicApprovalModule.items.0.id', $selectionId));
+
+        $this->actingAs($previousReviewer)
+            ->post(route('fc-topic-selections.approve'), ['selection_id' => $selectionId])
+            ->assertSessionHasErrors('selection');
+
+        $this->actingAs($currentReviewer)
+            ->post(route('fc-topic-selections.approve'), ['selection_id' => $selectionId])
+            ->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('fc_topic_selections', [
+            'id' => $selectionId,
+            'status' => 'approved',
+            'reviewed_by' => $currentReviewer->id,
+        ]);
     }
 
     public function test_employee_must_get_first_supervisor_approval_for_fc_topics_before_assessment(): void
@@ -133,6 +192,27 @@ class FcTopicSelectionFlowTest extends TestCase
                 && $mail->employee->is($employee)
                 && in_array('สมรรถนะ FC1-FLOW-01', $mail->topicNames, true);
         });
+
+        $replacementReviewer = User::factory()->create([
+            'role_id' => $this->roleId('employee'),
+        ]);
+        DB::table('user_reviewer_steps')
+            ->where('user_id', $employee->id)
+            ->where('chain_type', 'assessment')
+            ->update(['reviewer_id' => $replacementReviewer->id]);
+
+        $this->actingAs($supervisor)
+            ->post(route('fc-topic-selections.approve'), ['selection_id' => $selectionId])
+            ->assertSessionHasErrors('selection');
+        $this->assertDatabaseHas('fc_topic_selections', [
+            'id' => $selectionId,
+            'status' => 'submitted',
+        ]);
+
+        DB::table('user_reviewer_steps')
+            ->where('user_id', $employee->id)
+            ->where('chain_type', 'assessment')
+            ->update(['reviewer_id' => $supervisor->id]);
 
         $this->actingAs($supervisor)
             ->post(route('fc-topic-selections.reject'), [

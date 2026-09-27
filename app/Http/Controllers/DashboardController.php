@@ -119,6 +119,10 @@ class DashboardController extends Controller
         }
         $fcTopicApprovalModule = $this->fcTopicApprovalModuleForReviewer($currentUser);
         $assessmentApprovalModule = $this->assessmentApprovalModuleForReviewer($currentUser);
+        $reviewerTeamUsers = ($assessmentApprovalModule['enabled'] ?? false)
+            && ! in_array($role, ['supervisor', 'dept_head', 'division_head', 'academic_department_head'], true)
+            ? $this->dashboardUsersForReviewer($currentUser, ['assessment'])
+            : null;
         $selfServicePayload = [
             'activeCycleName' => $activeCycleName,
             'currentUser' => $this->dashboardUserPayload($currentUser),
@@ -135,6 +139,7 @@ class DashboardController extends Controller
             'teamIdpAnalytics' => $teamIdpAnalytics,
             'fcTopicApprovalModule' => $fcTopicApprovalModule,
             'assessmentApprovalModule' => $assessmentApprovalModule,
+            'reviewerTeamUsers' => $reviewerTeamUsers,
         ];
 
         return match ($role) {
@@ -251,8 +256,10 @@ class DashboardController extends Controller
                 'currentUser' => $this->dashboardUserPayload($currentUser),
                 'fcTopicApprovalModule' => $fcTopicApprovalModule,
                 'assessmentApprovalModule' => $assessmentApprovalModule,
+                'reviewerTeamUsers' => $reviewerTeamUsers,
                 'idpReviewModule' => $idpReviewModule,
                 'idpReviewItems' => $idpReviewItems,
+                'teamIdpAnalytics' => $teamIdpAnalytics,
                 'managerSummary' => $managerSummary,
                 'activeCycleName' => $activeCycleName,
                 'departmentRows' => [],
@@ -426,11 +433,18 @@ class DashboardController extends Controller
             return collect();
         }
 
-        $visibleUserIds = collect([
-            $currentUser->id,
-            ...$this->reviewerChainResolver->userIdsForReviewer($currentUser, 'assessment'),
-            ...$this->reviewerChainResolver->userIdsForReviewer($currentUser, 'idp'),
-        ])->map(fn ($id): int => (int) $id)->unique()->values();
+        return $this->dashboardUsersForReviewer($currentUser, ['assessment', 'idp']);
+    }
+
+    private function dashboardUsersForReviewer(User $currentUser, array $chainTypes): Collection
+    {
+        $visibleUserIds = collect([$currentUser->id]);
+        foreach ($chainTypes as $chainType) {
+            $visibleUserIds = $visibleUserIds->merge(
+                $this->reviewerChainResolver->userIdsForReviewer($currentUser, $chainType)
+            );
+        }
+        $visibleUserIds = $visibleUserIds->map(fn ($id): int => (int) $id)->unique()->values();
 
         return User::with('role')
             ->whereIn('id', $visibleUserIds)
@@ -1317,15 +1331,25 @@ class DashboardController extends Controller
             return ['enabled' => false, 'items' => []];
         }
 
-        $stepQuery = DB::table('user_reviewer_steps')
-            ->where('reviewer_id', $reviewer->id)
-            ->where('step_order', 1);
+        $hasChainType = Schema::hasColumn('user_reviewer_steps', 'chain_type');
+        $firstStepQuery = DB::table('user_reviewer_steps')
+            ->select('user_id')
+            ->selectRaw('MIN(step_order) as first_step')
+            ->where('step_order', '>', 0)
+            ->where('reviewer_id', '>', 0)
+            ->when($hasChainType, fn ($query) => $query->where('chain_type', 'assessment'))
+            ->groupBy('user_id');
+        $firstReviewerQuery = DB::table('user_reviewer_steps as reviewer_steps')
+            ->joinSub($firstStepQuery, 'first_steps', fn ($join) => $join
+                ->on('reviewer_steps.user_id', '=', 'first_steps.user_id')
+                ->on('reviewer_steps.step_order', '=', 'first_steps.first_step'))
+            ->where('reviewer_steps.reviewer_id', $reviewer->id)
+            ->when($hasChainType, fn ($query) => $query->where('reviewer_steps.chain_type', 'assessment'));
 
-        if (Schema::hasColumn('user_reviewer_steps', 'chain_type')) {
-            $stepQuery->where('chain_type', 'assessment');
-        }
-
-        $employeeIds = $stepQuery->pluck('user_id')->map(fn ($id) => (int) $id)->unique()->values();
+        $employeeIds = $firstReviewerQuery->pluck('reviewer_steps.user_id')
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
 
         if ($employeeIds->isEmpty()) {
             return ['enabled' => false, 'items' => []];
@@ -1338,7 +1362,6 @@ class DashboardController extends Controller
         $employees = User::query()->whereIn('id', $employeeIds)->get()->keyBy('id');
         $selections = DB::table('fc_topic_selections')
             ->whereIn('user_id', $employeeIds)
-            ->where('submitted_to', $reviewer->id)
             ->where('status', 'submitted')
             ->where('assessment_round_id', $roundId)
             ->orderBy('submitted_at')
@@ -1466,9 +1489,11 @@ class DashboardController extends Controller
                     'organization' => $this->approvalOrganizationForUser($employee, $department) ?: '-',
                     'reviewStep' => $step,
                     'totalSteps' => count($this->reviewerChainResolver->stepsForUser($employee)),
+                    'nextStatus' => $nextStatus,
                     'submittedAt' => $allCompetencies->pluck('updatedAt')->filter()->max(),
                     'competencies' => $competencies,
                     'allCompetencies' => $allCompetencies->values()->all(),
+                    'assignedCompetencies' => $this->assignedCompetenciesForUser($employee),
                     'statusLabel' => $totalCompetencies === 0
                         ? 'ยังไม่ประเมิน'
                         : 'ตรวจสอบแล้ว '.$reviewedCount.'/'.$totalCompetencies,
@@ -2253,6 +2278,7 @@ class DashboardController extends Controller
                 'competency_gaps.id as gap_id',
                 'idp_items.id as item_id',
                 'idp_items.status as plan_status',
+                'idp_items.current_review_step as plan_current_review_step',
                 'idp_items.goal',
                 'idp_items.success_criteria',
                 'competencies.code as competency_code',
@@ -2274,12 +2300,12 @@ class DashboardController extends Controller
             ->orderBy('competencies.code')
             ->get();
 
-        $approvedItemIds = $items
-            ->filter(fn (object $item): bool => $item->item_id !== null && $item->plan_status === 'approved')
+        $itemIds = $items
+            ->filter(fn (object $item): bool => $item->item_id !== null)
             ->pluck('item_id')
             ->map(fn ($id): int => (int) $id)
             ->all();
-        $activities = $this->progressActivitiesForItems($approvedItemIds, false);
+        $activities = $this->progressActivitiesForItems($itemIds, false);
 
         $completionIds = DB::table('idp_item_completion_submissions')
             ->whereIn('idp_item_id', $items->pluck('item_id')->filter())
@@ -2311,15 +2337,27 @@ class DashboardController extends Controller
 
         return $items->map(function (object $item) use ($assignments, $activities, $completionIds, $history, $reviewerStepsByOwner, $visibleUserIds): array {
             $itemId = $item->item_id ? (int) $item->item_id : null;
+            $planApproved = $item->plan_status === 'approved';
             $completionId = $itemId ? ($completionIds[$itemId] ?? null) : null;
             $itemActivities = $itemId ? ($activities[$itemId] ?? []) : [];
-            $completionStatus = $item->completion_status ?: 'in_progress';
-            $schedule = $this->idpSchedulePayload($itemActivities, $completionStatus, $item->submitted_at);
+            if (! $planApproved) {
+                $itemActivities = array_map(fn (array $activity): array => [
+                    ...$activity,
+                    'updates' => [],
+                    'completion' => null,
+                ], $itemActivities);
+            }
+            $completionStatus = $planApproved ? ($item->completion_status ?: 'in_progress') : 'not_started';
+            $schedule = $this->idpSchedulePayload($planApproved ? $itemActivities : [], $completionStatus, $item->submitted_at);
             $reviewerStep = (int) ($assignments[(int) $item->user_id] ?? 0);
-            $firstReviewerStep = (int) (collect($reviewerStepsByOwner->get((int) $item->user_id, []))->min('step') ?? 0);
+            $ownerReviewers = collect($reviewerStepsByOwner->get((int) $item->user_id, []));
+            $firstReviewerStep = (int) ($ownerReviewers->min('step') ?? 0);
+            $planReviewStep = preg_match('/^review_step_(\d+)$/', (string) $item->plan_status, $planStepMatch)
+                ? (int) ($item->plan_current_review_step ?: $planStepMatch[1])
+                : null;
+            $planReviewer = $planReviewStep ? $ownerReviewers->firstWhere('step', $planReviewStep) : null;
             $currentReviewer = $item->current_review_step
-                ? collect($reviewerStepsByOwner->get((int) $item->user_id, []))
-                    ->firstWhere('step', (int) $item->current_review_step)
+                ? $ownerReviewers->firstWhere('step', (int) $item->current_review_step)
                 : null;
 
             return [
@@ -2327,13 +2365,16 @@ class DashboardController extends Controller
                 'itemId' => $itemId,
                 'competencyGapId' => (int) $item->gap_id,
                 'planStatus' => $item->plan_status ?: 'not_started',
-                'completionPublicId' => $item->completion_public_id,
+                'planCurrentReviewStep' => $planReviewStep,
+                'planCurrentReviewerName' => $planReviewer['name'] ?? null,
+                'completionPublicId' => $planApproved ? $item->completion_public_id : null,
                 'completionStatus' => $completionStatus,
-                'completionResult' => $item->completion_result,
-                'submissionVersion' => (int) ($item->submission_version ?? 0),
-                'currentReviewStep' => $item->current_review_step ? (int) $item->current_review_step : null,
-                'currentReviewerName' => $currentReviewer['name'] ?? null,
+                'completionResult' => $planApproved ? $item->completion_result : null,
+                'submissionVersion' => $planApproved ? (int) ($item->submission_version ?? 0) : 0,
+                'currentReviewStep' => $planApproved && $item->current_review_step ? (int) $item->current_review_step : null,
+                'currentReviewerName' => $planApproved ? ($currentReviewer['name'] ?? null) : null,
                 'canReview' => $visibleUserIds === null
+                    && $planApproved
                     && filled($item->completion_public_id)
                     && $reviewerStep === $firstReviewerStep
                     && $item->completion_status === 'review_step_'.$reviewerStep,
@@ -2344,11 +2385,11 @@ class DashboardController extends Controller
                 'competencyName' => $item->competency_name,
                 'goal' => $item->goal ?? '',
                 'successCriteria' => $item->success_criteria ?? '',
-                'submittedAt' => $this->isoUtcTimestamp($item->submitted_at),
-                'completionUpdatedAt' => $this->isoUtcTimestamp($item->completion_updated_at),
+                'submittedAt' => $planApproved ? $this->isoUtcTimestamp($item->submitted_at) : null,
+                'completionUpdatedAt' => $planApproved ? $this->isoUtcTimestamp($item->completion_updated_at) : null,
                 ...$schedule,
                 'activities' => $itemActivities,
-                'reviewHistory' => ($completionId ? ($history[$completionId] ?? collect()) : collect())->map(fn (object $review): array => [
+                'reviewHistory' => ($planApproved && $completionId ? ($history[$completionId] ?? collect()) : collect())->map(fn (object $review): array => [
                     'submissionVersion' => (int) $review->submission_version,
                     'reviewStep' => (int) $review->review_step,
                     'reviewerName' => trim(($review->reviewer_title ?: '').$review->reviewer_name),

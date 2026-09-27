@@ -13,6 +13,8 @@ import EmployeeProgress from '../Employee/EmployeeProgress.vue';
 import IdpItemApproval from './IdpItemApproval.vue';
 import IdpActivityProgressReview from './IdpActivityProgressReview.vue';
 import FcTopicApproval from '../Employee/FcTopicApproval.vue';
+import { assessmentReviewRoster, isInProgressAssessmentReview, isPendingAssessmentReview } from '../../utils/assessmentReviewRoster';
+import { availableAssessmentHubTab, initialAssessmentHubTab } from '../../utils/assessmentHubTab';
 const selectedEmployee = ref(null);
 const props = defineProps({
     roleKey: { type: String, default: null },
@@ -48,7 +50,7 @@ const idpOverdueCount = computed(() => uniqueIdpPersonCount(
 const idpPendingProgressReviewCount = computed(() => uniqueIdpPersonCount(
     idpProgressItems.value.filter((item) => item.canReview),
 ));
-const users = ref(clone(page.props.users || []));
+const users = ref(clone(page.props.reviewerTeamUsers ?? page.props.users ?? []));
 const requestedPage = ref(typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('page')
     : null);
@@ -90,7 +92,7 @@ const authRoleKey = computed(() => normalizeRoleKey(props.roleKey || page.props.
 const fcTopicApprovalModule = computed(() => page.props.fcTopicApprovalModule || { enabled: false, items: [] });
 const assessmentApprovalModule = computed(() => page.props.assessmentApprovalModule || { enabled: false, items: [], pendingCount: 0 });
 const idpReviewModule = computed(() => page.props.idpReviewModule || { enabled: false, assignmentCount: 0 });
-const assessmentHubTab = ref(fcTopicApprovalModule.value.enabled ? 'topics' : 'results');
+const assessmentHubTab = ref(initialAssessmentHubTab(fcTopicApprovalModule.value.enabled));
 const currentRoleData = computed(() => ROLES_CONFIG[authRoleKey.value] || ROLES_CONFIG.dept_head || ROLES_CONFIG.supervisor);
 const navSections = computed(() => {
     const sections = [{
@@ -109,7 +111,7 @@ const navSections = computed(() => {
         ...((fcTopicApprovalModule.value.enabled || assessmentApprovalModule.value.enabled)
             ? [{ id: 'dh-assess', ic: '', lb: 'อนุมัติการประเมิน' }]
             : []),
-        ...(isHeadRole ? [{ id: 'sup-gap', ic: '', lb: 'ผลการประเมินของทีม' }] : []),
+        ...(isHeadRole || assessmentApprovalModule.value.enabled ? [{ id: 'sup-gap', ic: '', lb: 'ผลการประเมินของทีม' }] : []),
         ...(idpReviewModule.value.enabled ? [{ id: 'dh-idp', ic: '', lb: 'อนุมัติแผนและผล IDP' }] : []),
     ];
 
@@ -306,7 +308,7 @@ const supervisorApprovalStatus = (person, results = []) => {
     const hasNotSelfAssessed = workflows.some((workflow) => workflow.key === 'self_pending');
     const hasStarted = workflows.some((workflow) => workflow.key !== 'self_pending');
     if (hasNotSelfAssessed && hasStarted) {
-        return { label: 'อยู่ระหว่างดำเนินการ', cls: 'bb' };
+        return { key: 'in_progress', label: 'อยู่ระหว่างดำเนินการ', cls: 'bb' };
     }
 
     return { label: 'รอท่านอื่นประเมิน', cls: 'bb' };
@@ -405,9 +407,9 @@ const workflowNodeStateLabel = (state) => ({
     returned: 'ส่งกลับแก้ไข',
     waiting: 'รอ',
 }[state] || 'รอ');
-const supervisorApprovalRows = computed(() => teamMembers.value.map((person) => {
-    const reviewStep = reviewerStepForUser(person);
-    const approvalTotalSteps = reviewerStepCountForUser(person);
+const supervisorApprovalRows = computed(() => assessmentReviewRoster(assessmentApprovalModule.value.items || [], users.value).map((person) => {
+    const reviewStep = Number(person.assessmentAssignment.reviewStep) || reviewerStepForUser(person);
+    const approvalTotalSteps = Number(person.assessmentAssignment.totalSteps) || reviewerStepCountForUser(person);
     const results = gapResultRows(person).map((row) => {
         const workflowStatus = competencyWorkflowStatus(person, row);
 
@@ -421,7 +423,7 @@ const supervisorApprovalRows = computed(() => teamMembers.value.map((person) => 
     const hasSubmittedAssessment = results.some((row) => row.hasAssessment) || (person.evalStatus && person.evalStatus !== 'draft');
     const hasReviewableCompetencies = results.length > 0;
     const approvalExpectedStatus = pendingStatusForReviewerStep(reviewStep);
-    const approvalNextStatus = reviewStep ? nextStatusAfterReviewerStep(person, reviewStep) : null;
+    const approvalNextStatus = person.assessmentAssignment.nextStatus || (reviewStep ? nextStatusAfterReviewerStep(person, reviewStep) : null);
 
     return {
         ...person,
@@ -442,19 +444,16 @@ const approvalRoleLabel = computed(() => ({
     division_head: 'หัวหน้าฝ่าย',
     academic_department_head: 'หัวหน้าภาควิชา',
 }[authRoleKey.value] || 'ผู้ประเมิน'));
-const approvalForwardLabel = computed(() => 'ส่งต่อขั้นตอนถัดไปแล้ว');
 const supervisorPendingRows = computed(() => supervisorApprovalRows.value.filter((person) =>
-    person.results.some((row) => row.workflowStatus.isCurrentReviewer),
+    isPendingAssessmentReview(person),
 ));
 const supervisorTrackingRows = computed(() => supervisorApprovalRows.value.filter((person) =>
-    person.hasReviewableCompetencies
-    && !person.results.some((row) => row.workflowStatus.isCurrentReviewer),
+    !isPendingAssessmentReview(person),
 ));
-const supervisorForwardedRows = computed(() => supervisorApprovalRows.value.filter((person) =>
-    person.results.some((row) => normalizeAssessmentStatus(row.status) === person.approvalNextStatus),
-));
+const supervisorInProgressRows = computed(() => supervisorApprovalRows.value.filter(isInProgressAssessmentReview));
 const supervisorApprovedRows = computed(() => supervisorApprovalRows.value.filter((person) =>
-    person.results.length > 0 && person.results.every((row) => row.workflowStatus.key === 'approved'),
+    person.assessmentAssignment.isApproved
+    || (person.results.length > 0 && person.results.every((row) => row.workflowStatus.key === 'approved')),
 ));
 const fcTopicApprovalRows = computed(() => teamMembers.value
     .map((person) => ({
@@ -1062,7 +1061,6 @@ const selectAssessmentEmployee = (person) => {
 };
 
 const openSupervisorApprovalModal = (person) => {
-    if (!person.hasReviewableCompetencies) return;
     selectedSupervisorApprovalSso.value = person.sso;
     openedSupervisorCompetencyId.value = null;
 };
@@ -1209,14 +1207,15 @@ watchEffect(() => {
         activePage.value = defaultPageForRole(authRoleKey.value);
     }
     if (activePage.value === 'dh-assess') {
-        if (assessmentHubTab.value === 'topics' && !fcTopicApprovalModule.value.enabled) assessmentHubTab.value = 'results';
-        if (assessmentHubTab.value === 'results' && !assessmentApprovalModule.value.enabled) assessmentHubTab.value = 'topics';
+        assessmentHubTab.value = availableAssessmentHubTab(assessmentHubTab.value, assessmentApprovalModule.value.enabled);
     }
     if (activePage.value === 'dh-idp' && !idpReviewModule.value.enabled) {
         activePage.value = defaultPageForRole(authRoleKey.value);
     }
 
-    if (page.props.users?.length) {
+    if (Array.isArray(page.props.reviewerTeamUsers)) {
+        users.value = clone(page.props.reviewerTeamUsers);
+    } else if (Array.isArray(page.props.users)) {
         users.value = clone(page.props.users);
     }
 });
@@ -1571,7 +1570,7 @@ const logout = () => router.post(route('logout'));
                 </template>
 
                 <section
-                    v-else-if="(activePage === 'dh-fc-topic-approval' || (activePage === 'dh-assess' && assessmentHubTab === 'topics')) && fcTopicApprovalModule.enabled"
+                    v-else-if="(activePage === 'dh-fc-topic-approval' && fcTopicApprovalModule.enabled) || (activePage === 'dh-assess' && assessmentHubTab === 'topics' && (fcTopicApprovalModule.enabled || assessmentApprovalModule.enabled))"
                     class="assessment-approval-hub"
                 >
                     <template v-if="activePage === 'dh-assess'">
@@ -1588,7 +1587,7 @@ const logout = () => router.post(route('logout'));
                         </header>
                         <nav v-if="assessmentApprovalModule.enabled" class="assessment-hub-tabs" aria-label="ประเภทงานอนุมัติ">
                             <button type="button" class="active" aria-current="page"><i aria-hidden="true">1</i><span><strong>หัวข้อการประเมิน</strong><small>ตรวจก่อนเปิดแบบประเมิน</small></span><b>{{ fcTopicApprovalModule.items?.length || 0 }}</b></button>
-                            <button v-if="assessmentApprovalModule.enabled" type="button" @click="assessmentHubTab = 'results'"><i aria-hidden="true">2</i><span><strong>ผลการประเมิน</strong><small>ตรวจผลและส่งต่อ</small></span><b>{{ supervisorPendingRows.length }}</b></button>
+                            <button type="button" @click="assessmentHubTab = 'results'"><i aria-hidden="true">2</i><span><strong>ผลการประเมิน</strong><small>ตรวจผลและส่งต่อ</small></span><b>{{ supervisorPendingRows.length }}</b></button>
                         </nav>
                     </template>
                     <FcTopicApproval :module="fcTopicApprovalModule" :compact="activePage === 'dh-assess'" />
@@ -1606,8 +1605,8 @@ const logout = () => router.post(route('logout'));
                             <strong>{{ (fcTopicApprovalModule.items?.length || 0) + supervisorPendingRows.length === 0 ? 'ไม่มีงานรอดำเนินการ' : `มี ${(fcTopicApprovalModule.items?.length || 0) + supervisorPendingRows.length} รายการรอดำเนินการ` }}</strong>
                         </div>
                     </header>
-                    <nav v-if="fcTopicApprovalModule.enabled" class="assessment-hub-tabs" aria-label="ประเภทงานอนุมัติ">
-                        <button v-if="fcTopicApprovalModule.enabled" type="button" @click="assessmentHubTab = 'topics'"><i aria-hidden="true">1</i><span><strong>หัวข้อการประเมิน</strong><small>ตรวจก่อนเปิดแบบประเมิน</small></span><b>{{ fcTopicApprovalModule.items?.length || 0 }}</b></button>
+                    <nav class="assessment-hub-tabs" aria-label="ประเภทงานอนุมัติ">
+                        <button type="button" @click="assessmentHubTab = 'topics'"><i aria-hidden="true">1</i><span><strong>หัวข้อการประเมิน</strong><small>ตรวจก่อนเปิดแบบประเมิน</small></span><b>{{ fcTopicApprovalModule.items?.length || 0 }}</b></button>
                         <button type="button" class="active" aria-current="page"><i aria-hidden="true">2</i><span><strong>ผลการประเมิน</strong><small>ตรวจผลและส่งต่อ</small></span><b>{{ supervisorPendingRows.length }}</b></button>
                     </nav>
                     <template v-if="assessmentApprovalModule.enabled">
@@ -1620,12 +1619,12 @@ const logout = () => router.post(route('logout'));
                                 <div class="pending">
                                     <dt>รอตรวจ</dt>
                                     <dd>{{ supervisorPendingRows.length }}</dd>
-                                    <small>รายการ</small>
+                                    <small>คน</small>
                                 </div>
                                 <div>
-                                    <dt>{{ approvalForwardLabel }}</dt>
-                                    <dd>{{ supervisorForwardedRows.length }}</dd>
-                                    <small>รายการ</small>
+                                    <dt>อยู่ระหว่างดำเนินการ</dt>
+                                    <dd>{{ supervisorInProgressRows.length }}</dd>
+                                    <small>คน</small>
                                 </div>
                                 <div class="complete">
                                     <dt>อนุมัติครบแล้ว</dt>
@@ -1783,7 +1782,7 @@ const logout = () => router.post(route('logout'));
                             <header class="assessment-list-head">
                                 <div>
                                     <h3>ติดตามสถานะ</h3>
-                                    <p>รายการที่ดำเนินการแล้ว ถูกส่งกลับ หรือกำลังรอผู้พิจารณาลำดับอื่น</p>
+                                    <p>สมาชิกในสายของคุณที่ยังไม่ถึงคิวตรวจ กำลังแก้ไข หรือดำเนินการแล้ว</p>
                                 </div>
                                 <span>{{ supervisorTrackingRows.length }} รายการ</span>
                             </header>
@@ -1825,7 +1824,7 @@ const logout = () => router.post(route('logout'));
                             </div>
                         </section>
 
-                        <div v-if="selectedSupervisorApproval?.hasReviewableCompetencies" class="approval-modal-backdrop" @click.self="closeSupervisorApprovalModal">
+                        <div v-if="selectedSupervisorApproval" class="approval-modal-backdrop" @click.self="closeSupervisorApprovalModal">
                             <div class="approval-modal">
                                 <div class="approval-modal-head">
                                     <div>
@@ -1912,7 +1911,7 @@ const logout = () => router.post(route('logout'));
                                     </div>
 
                                     <div v-if="selectedSupervisorApproval.results.length === 0" class="empty-card compact">
-                                        ไม่มีผลคะแนนในรายการนี้
+                                        ยังไม่มีผลการประเมินให้ดู
                                     </div>
                                 </div>
 

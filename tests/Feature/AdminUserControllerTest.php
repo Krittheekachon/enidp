@@ -159,6 +159,49 @@ class AdminUserControllerTest extends TestCase
         $this->assertTrue(Hash::check('password', $user->refresh()->password));
     }
 
+    public function test_admin_can_edit_other_fields_without_reselecting_legacy_organization(): void
+    {
+        $admin = User::factory()->create(['role_id' => $this->roleId('admin')]);
+        $user = User::factory()->create([
+            'sso' => 'legacy-staff',
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายเดิม > งานเดิม > หน่วยเดิม',
+            'position' => 'ตำแหน่งเดิม',
+            'level' => 'ระดับเดิม',
+            'position_id' => null,
+            'level_id' => null,
+            'role_id' => $this->roleId('employee'),
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $user), [
+                'sso' => 'legacy-staff',
+                'fn' => 'ชื่อใหม่',
+                'ln' => 'นามสกุลใหม่',
+                'em' => 'legacy-updated@example.com',
+                'r' => 'employee',
+                'w' => 'สายวิชาการ',
+                'd' => 'สังกัดที่ไม่ถูกต้อง',
+                'p' => 'ตำแหน่งที่ไม่ถูกต้อง',
+                'l' => 'ระดับที่ไม่ถูกต้อง',
+                'preserve_existing_structure' => true,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $user->id,
+            'name' => 'ชื่อใหม่ นามสกุลใหม่',
+            'email' => 'legacy-updated@example.com',
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายเดิม > งานเดิม > หน่วยเดิม',
+            'position' => 'ตำแหน่งเดิม',
+            'level' => 'ระดับเดิม',
+            'position_id' => null,
+            'level_id' => null,
+        ]);
+    }
+
     public function test_admin_can_update_three_assessment_reviewer_steps(): void
     {
         $admin = User::factory()->create(['role_id' => $this->roleId('admin')]);

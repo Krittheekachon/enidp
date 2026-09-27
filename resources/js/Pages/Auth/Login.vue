@@ -1,5 +1,8 @@
 <script setup>
+import { ref } from 'vue';
 import { Head, useForm } from '@inertiajs/vue3';
+
+const showPassword = ref(false);
 
 const form = useForm({
     email: '',
@@ -9,7 +12,10 @@ const form = useForm({
 
 const submit = () => {
     form.post(route('login'), {
-        onFinish: () => form.reset('password'),
+        onFinish: () => {
+            form.reset('password');
+            showPassword.value = false;
+        },
     });
 };
 </script>
@@ -85,15 +91,34 @@ const submit = () => {
 
                     <div class="field">
                         <label for="password">Password</label>
-                        <input
-                            id="password"
-                            v-model="form.password"
-                            autocomplete="current-password"
-                            class="input"
-                            placeholder="Password"
-                            required
-                            type="password"
-                        />
+                        <div class="password-input-wrap">
+                            <input
+                                id="password"
+                                v-model="form.password"
+                                autocomplete="current-password"
+                                class="input password-input"
+                                placeholder="Password"
+                                required
+                                :type="showPassword ? 'text' : 'password'"
+                            />
+                            <button
+                                class="password-toggle"
+                                type="button"
+                                :aria-label="showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'"
+                                :aria-pressed="showPassword"
+                                aria-controls="password"
+                                @click="showPassword = !showPassword"
+                            >
+                                <svg v-if="showPassword" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.7 2.7" />
+                                    <path d="M9.9 5.3A10.4 10.4 0 0 1 12 5c4.7 0 8.3 4.2 9 7a10.8 10.8 0 0 1-2.5 4.3M6.2 6.2A10.9 10.9 0 0 0 3 12c.7 2.8 4.3 7 9 7a9.8 9.8 0 0 0 3.6-.7" />
+                                </svg>
+                                <svg v-else viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M3 12c.7-2.8 4.3-7 9-7s8.3 4.2 9 7c-.7 2.8-4.3 7-9 7S3.7 14.8 3 12Z" />
+                                    <circle cx="12" cy="12" r="3" />
+                                </svg>
+                            </button>
+                        </div>
                         <p v-if="form.errors.password" class="error">{{ form.errors.password }}</p>
                     </div>
 
@@ -118,7 +143,6 @@ const submit = () => {
 .login-page {
     min-height: 100vh;
     min-height: 100svh;
-    overflow: hidden;
     background:
         radial-gradient(circle at 50% 47%, rgba(255, 255, 255, 0.025), transparent 36%),
         linear-gradient(180deg, #101719 0%, #0f1517 100%);
@@ -206,10 +230,8 @@ const submit = () => {
 .login-card {
     display: grid;
     width: min(1060px, 100%);
-    height: min(606px, calc(100svh - 144px));
     min-height: 540px;
     grid-template-columns: 499px minmax(0, 1fr);
-    overflow: hidden;
     border: 1px solid rgba(202, 211, 214, 0.38);
     border-radius: 8px;
     background: rgba(16, 23, 25, 0.7);
@@ -283,13 +305,14 @@ const submit = () => {
     display: flex;
     min-width: 0;
     flex-direction: column;
+    justify-content: center;
     background: rgba(16, 23, 25, 0.34);
     color: #ffffff;
-    padding: 63px 46px 50px 57px;
+    padding: 48px 46px 48px 57px;
 }
 
 .heading {
-    margin-bottom: 48px;
+    margin-bottom: 30px;
 }
 
 .heading h1 {
@@ -310,12 +333,12 @@ const submit = () => {
 
 .field {
     display: grid;
-    gap: 17px;
-    margin-bottom: 30px;
+    gap: 10px;
+    margin-bottom: 22px;
 }
 
 .field:last-of-type {
-    margin-bottom: 35px;
+    margin-bottom: 28px;
 }
 
 .field label {
@@ -327,7 +350,7 @@ const submit = () => {
 .input {
     box-sizing: border-box;
     width: 100%;
-    height: 68px;
+    height: 56px;
     border: 1px solid rgba(211, 221, 224, 0.66);
     border-radius: 7px;
     background: rgba(13, 19, 21, 0.28);
@@ -349,15 +372,60 @@ const submit = () => {
     box-shadow: 0 0 0 3px rgba(143, 48, 54, 0.22);
 }
 
+.password-input-wrap {
+    position: relative;
+}
+
+.password-input {
+    padding-right: 56px;
+}
+
+.password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 7px;
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    transform: translateY(-50%);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 6px;
+    background: rgba(35, 43, 45, 0.55);
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+}
+
+.password-toggle:hover {
+    background: rgba(35, 43, 45, 0.72);
+    color: #ffffff;
+}
+
+.password-toggle:focus-visible {
+    outline: 2px solid #ff9298;
+    outline-offset: 2px;
+}
+
+.password-toggle svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
 .error {
-    margin: -5px 0 -16px;
+    margin: 0;
     color: #ff9298;
-    font-size: 12px;
+    font-size: 13px;
+    line-height: 1.5;
 }
 
 .submit-button {
     width: 100%;
-    height: 77px;
+    min-height: 60px;
     margin-top: 0;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 7px;
@@ -390,7 +458,7 @@ const submit = () => {
 }
 
 .password-help {
-    margin: 14px 0 0;
+    margin: 16px 0 0;
     color: rgba(255, 255, 255, 0.68);
     font-size: 13px;
     line-height: 1.5;
@@ -416,7 +484,6 @@ const submit = () => {
     }
 
     .login-card {
-        height: auto;
         min-height: 0;
         grid-template-columns: 1fr;
     }
@@ -454,11 +521,11 @@ const submit = () => {
     }
 
     .login-form {
-        padding: 38px clamp(24px, 7vw, 54px) 44px;
+        padding: 36px clamp(24px, 7vw, 54px) 40px;
     }
 
     .heading {
-        margin-bottom: 34px;
+        margin-bottom: 26px;
     }
 }
 
@@ -524,7 +591,7 @@ const submit = () => {
     }
 
     .heading {
-        margin-bottom: 28px;
+        margin-bottom: 24px;
     }
 
     .heading h1 {
@@ -537,15 +604,14 @@ const submit = () => {
     }
 
     .field {
-        margin-bottom: 25px;
+        margin-bottom: 20px;
     }
 
-    .input {
-        height: 56px;
+    .field:last-of-type {
+        margin-bottom: 24px;
     }
 
     .submit-button {
-        height: 60px;
         font-size: 18px;
     }
 }

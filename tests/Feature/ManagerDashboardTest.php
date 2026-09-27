@@ -76,6 +76,11 @@ class ManagerDashboardTest extends TestCase
                 ->component('Executive/Dashboard')
                 ->where('assessmentApprovalModule.enabled', true)
                 ->where('idpReviewModule.enabled', false)
+                ->where('reviewerTeamUsers', fn ($users): bool => collect($users)
+                    ->pluck('db_id')->sort()->values()->all() === collect([
+                        $dean->id,
+                        $employee->id,
+                    ])->sort()->values()->all())
             );
     }
 }

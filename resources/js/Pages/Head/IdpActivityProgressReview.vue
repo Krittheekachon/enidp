@@ -156,7 +156,7 @@ const updatesFor = (activity, topicIndex) => (activity.updates || [])
     .slice()
     .sort((left, right) => updateSubmittedTime(left) - updateSubmittedTime(right));
 const hasUpdates = (item) => (item.activities || []).some((activity) => (activity.updates || []).length > 0);
-const hasViewablePlan = (item) => item.planStatus === 'approved' && (item.activities || []).length > 0;
+const hasViewablePlan = (item) => item.itemId != null || (item.isStatusPreview && (item.activities || []).length > 0);
 const activityUpdateCount = (activity) => (activity.updates || []).length;
 const activityTopicCount = (activity) => planRows(activity).length;
 const operationResultLabel = (value) => value === 'as_planned'
@@ -268,10 +268,16 @@ const activityTimelineEntries = (activity, item) => {
 const planStatusLabel = (item) => {
     if (item.planStatus === 'approved') return 'แผนอนุมัติแล้ว';
     if (item.planStatus === 'revision_required') return 'แผนถูกส่งกลับให้แก้ไข';
-    if (/^review_step_\d+$/.test(item.planStatus || '')) return 'แผนอยู่ระหว่างอนุมัติ';
-    return 'ยังไม่ได้ส่งแผน';
+    if (/^review_step_\d+$/.test(item.planStatus || '')) {
+        return item.planCurrentReviewerName
+            ? `รอ ${item.planCurrentReviewerName} อนุมัติแผน`
+            : `รอผู้อนุมัติแผนลำดับที่ ${item.planCurrentReviewStep || item.planStatus.split('_').at(-1)}`;
+    }
+    if (item.planStatus === 'draft') return 'แผนฉบับร่าง ยังไม่ได้ส่งอนุมัติ';
+    return 'ยังไม่ได้เริ่มทำแผน';
 };
 const statusLabel = (item) => {
+    if (item.planStatus !== 'approved') return planStatusLabel(item);
     if (item.completionStatus === 'approved' && item.completionResult === 'failed') return 'ไม่ผ่าน';
     if (item.completionStatus === 'approved') return 'อนุมัติผลแล้ว';
     if (item.completionStatus === 'revision_required') return 'ถูกส่งกลับให้แก้ไข';
@@ -285,6 +291,9 @@ const statusLabel = (item) => {
     return 'กำลังดำเนินการ';
 };
 const statusTone = (item) => {
+    if (item.planStatus === 'revision_required') return 'revision';
+    if (item.planStatus === 'draft' || item.planStatus === 'not_started') return 'empty';
+    if (item.planStatus !== 'approved') return 'queued';
     if (item.completionStatus === 'approved' && item.completionResult === 'failed') return 'revision';
     if (item.completionStatus === 'approved') return 'done';
     if (item.completionStatus === 'revision_required') return 'revision';
@@ -294,7 +303,8 @@ const statusTone = (item) => {
     return 'active';
 };
 const detailButtonLabel = (item) => {
-    if (!hasViewablePlan(item)) return 'ยังไม่มีแผนที่อนุมัติ';
+    if (!hasViewablePlan(item)) return 'ยังไม่มีแผน';
+    if (item.planStatus !== 'approved') return 'ดูแผน';
     return isReviewMode.value && item.canReview ? 'ตรวจผล' : 'ดูรายละเอียด';
 };
 const open = (item) => {
@@ -409,7 +419,7 @@ const formatDateTime = (value) => {
                                     <small v-if="activity.methodLabel">{{ activity.methodLabel }}</small>
                                 </li>
                             </ul>
-                            <p v-else>ยังไม่มีกิจกรรม</p>
+                            <p v-else>{{ item.itemId != null ? 'ยังไม่ได้ระบุกิจกรรมในแผน' : 'ยังไม่มีแผน' }}</p>
                         </div>
 
                         <div class="competency-action">
@@ -437,6 +447,7 @@ const formatDateTime = (value) => {
                     <div class="dialog-title-row">
                         <span class="dialog-code">{{ selectedItem.competencyCode }}</span>
                         <h2 id="progress-dialog-title">{{ selectedItem.competencyName }}</h2>
+                        <span class="review-status" :class="statusTone(selectedItem)">{{ selectedItem.planStatus === 'approved' ? 'แผนอนุมัติแล้ว' : planStatusLabel(selectedItem) }}</span>
                     </div>
                 </div>
                 <button class="dialog-close" type="button" aria-label="ปิด" @click="close">×</button>
@@ -472,7 +483,7 @@ const formatDateTime = (value) => {
                                 v-for="(activity, activityIndex) in selectedItem.activities"
                                 :key="activity.id"
                                 type="button"
-                                :class="{ active: selectedActivity?.id === activity.id }"
+                                :class="{ active: selectedActivity?.id === activity.id, 'plan-only': selectedItem.planStatus !== 'approved' }"
                                 :aria-pressed="selectedActivity?.id === activity.id"
                                 @click="selectActivity(activity.id)"
                             >
@@ -481,7 +492,7 @@ const formatDateTime = (value) => {
                                     <strong>{{ activity.name || 'ไม่ระบุชื่อกิจกรรม' }}</strong>
                                     <small>{{ formatDate(activity.startDate) }} – {{ formatDate(activity.endDate) }}</small>
                                 </span>
-                                <span class="activity-count" :class="{ empty: !activityUpdateCount(activity) }">{{ activityUpdateCount(activity) }} อัปเดต</span>
+                                <span v-if="selectedItem.planStatus === 'approved'" class="activity-count" :class="{ empty: !activityUpdateCount(activity) }">{{ activityUpdateCount(activity) }} อัปเดต</span>
                             </button>
                         </div>
                     </aside>
@@ -501,7 +512,7 @@ const formatDateTime = (value) => {
 
                         <div class="activity-detail-meta">
                             <span>{{ activityTopicCount(selectedActivity) }} หัวข้อ</span>
-                            <span>{{ activityUpdateCount(selectedActivity) }} รายการอัปเดต</span>
+                            <span v-if="selectedItem.planStatus === 'approved'">{{ activityUpdateCount(selectedActivity) }} รายการอัปเดต</span>
                             <button
                                 class="plan-toggle"
                                 type="button"
@@ -513,7 +524,7 @@ const formatDateTime = (value) => {
                             </button>
                         </div>
 
-                        <section class="chronological-history" aria-label="ประวัติความก้าวหน้าและการตรวจสอบ">
+                        <section v-if="selectedItem.planStatus === 'approved'" class="chronological-history" aria-label="ประวัติความก้าวหน้าและการตรวจสอบ">
                             <header>
                                 <strong>ประวัติความก้าวหน้าและการตรวจสอบ</strong>
                                 <span>เรียงตามวันและเวลาที่เกิดขึ้น</span>
@@ -549,10 +560,11 @@ const formatDateTime = (value) => {
                             </template>
                             <div v-if="!activityTimelineEntries(selectedActivity, selectedItem).length" class="no-update"><span>ยังไม่มีประวัติ</span><small>บุคลากรยังไม่ได้ส่งความก้าวหน้าหรือส่งตรวจ</small></div>
                         </section>
+                        <div v-else class="plan-readonly-note">แผนนี้ยังไม่อนุมัติ ดูรายละเอียดกิจกรรมได้ แต่ยังไม่มีการติดตามความก้าวหน้า</div>
                     </main>
                 </section>
 
-                <div v-else class="activities-empty">ยังไม่มีกิจกรรมในแผนพัฒนานี้</div>
+                <div v-else class="activities-empty">{{ selectedItem.itemId != null ? 'ยังไม่ได้ระบุกิจกรรมในแผนพัฒนานี้' : 'ยังไม่ได้เริ่มทำแผนพัฒนา' }}</div>
 
                 <section v-if="isReviewMode && selectedItem.canReview" class="evaluation-section">
                     <header>
@@ -714,7 +726,8 @@ const formatDateTime = (value) => {
 .dialog-person { display: flex; align-items: center; gap: 10px; color: #65736d; font-size: 13px; }
 .dialog-person strong { color: #235f50; font-size: 14px; }
 .dialog-person span::before { margin-right: 10px; color: #b3beb9; content: '•'; }
-.dialog-title-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dialog-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.dialog-title-row .review-status { white-space: normal; }
 .dialog-code { flex: none; border-radius: 7px; background: #e7f2ee; padding: 7px 10px; color: #176b56; font-size: 14px; font-weight: 900; letter-spacing: .02em; }
 .dialog-title-row h2 { margin: 0; color: #22332d; font-size: 22px; line-height: 1.4; }
 .dialog-close { flex: none; width: 40px; height: 40px; border: 1px solid #cbd7d2; border-radius: 9px; background: #fff; color: #53615c; font: inherit; font-size: 25px; line-height: 1; cursor: pointer; }
@@ -744,6 +757,7 @@ const formatDateTime = (value) => {
 .activity-nav > header small { color: #82908a; font-size: 12px; }
 .activity-nav-list { display: grid; padding: 8px; }
 .activity-nav-list button { display: grid; grid-template-columns: 30px minmax(0, 1fr) 62px; align-items: start; gap: 10px; width: 100%; min-height: 68px; border: 1px solid transparent; border-radius: 9px; background: transparent; padding: 12px 10px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.activity-nav-list button.plan-only { grid-template-columns: 30px minmax(0, 1fr); }
 .activity-nav-list button + button { margin-top: 3px; }
 .activity-nav-list button:hover { background: #edf4f1; }
 .activity-nav-list button.active { border-color: #8db9ad; background: #e2f1eb; }
@@ -766,6 +780,7 @@ const formatDateTime = (value) => {
 .activity-period strong { color: #3e5049; font-size: 13px; }
 .activity-detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 11px 20px 0; }
 .activity-detail-meta > span { border-radius: 999px; background: #f0f4f2; padding: 5px 9px; color: #61716a; font-size: 11px; font-weight: 800; }
+.plan-readonly-note { margin: 14px 20px; border: 1px solid #d9e4df; border-radius: 8px; background: #f4f8f6; padding: 13px 15px; color: #536b60; font-size: 12px; line-height: 1.5; }
 .plan-toggle { display: inline-flex; align-items: center; gap: 9px; margin-left: auto; border: 1px solid var(--color-primary); border-radius: 8px; background: var(--color-primary); padding: 9px 14px; color: #fff; box-shadow: 0 3px 9px rgba(117, 41, 45, .18); font: inherit; font-size: 12px; font-weight: 900; cursor: pointer; transition: transform .18s ease-out, border-color .18s ease-out, background-color .18s ease-out, box-shadow .18s ease-out; }
 .plan-toggle:hover { border-color: var(--color-primary-hover); background: var(--color-primary-hover); box-shadow: 0 5px 13px rgba(117, 41, 45, .22); transform: translateY(-1px); }
 .plan-toggle:active { box-shadow: 0 2px 6px rgba(28, 95, 77, .18); transform: translateY(0); }

@@ -2,13 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\ProfileUpdateRequest;
 use App\Services\ReviewerChainResolver;
-use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Redirect;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -16,50 +12,19 @@ class ProfileController extends Controller
 {
     public function __construct(private ReviewerChainResolver $reviewerChainResolver) {}
 
-    /**
-     * Display the user's profile form.
-     */
+    /** Display the user's read-only profile. */
     public function edit(Request $request): Response
     {
         return Inertia::render('Profile/Edit', [
             'pageTitle' => 'โปรไฟล์',
-            'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
-            'status' => session('status'),
             'profileUser' => $this->profileData($request->user()),
         ]);
     }
 
-    /**
-     * Update the user's profile information.
-     */
-    public function update(ProfileUpdateRequest $request): RedirectResponse
+    /** Reject legacy self-service profile updates. Admins edit users through user management. */
+    public function update(): never
     {
-        $data = $request->validated();
-        $user = $request->user();
-
-        $firstNameTh = $data['first_name_th'] ?? '';
-        $lastNameTh = $data['last_name_th'] ?? '';
-        $fullName = trim($firstNameTh.' '.$lastNameTh);
-
-        $user->fill([
-            'title' => $data['title'] ?? '',
-            'name' => $fullName ?: ($data['name'] ?? $user->name),
-            'first_name_th' => $firstNameTh,
-            'last_name_th' => $lastNameTh,
-            'first_name_en' => $data['first_name_en'] ?? '',
-            'last_name_en' => $data['last_name_en'] ?? '',
-            'email' => $data['email'] ?: $user->email,
-            'phone' => $data['phone'] ?? '',
-            'profile_photo' => $data['profile_photo'] ?? null,
-        ]);
-
-        if ($user->isDirty('email')) {
-            $user->email_verified_at = null;
-        }
-
-        $user->save();
-
-        return Redirect::route('profile.edit');
+        abort(403, 'หากต้องการแก้ไขข้อมูลโปรไฟล์ กรุณาติดต่อผู้ดูแลระบบ (Admin)');
     }
 
     private function profileData($user): array

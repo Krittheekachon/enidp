@@ -44,6 +44,74 @@ class HrAssessmentRoundTest extends TestCase
         $this->assertSame(1, DB::table('assessment_rounds')->where('is_active', true)->count());
     }
 
+    public function test_round_year_is_derived_from_the_start_date_without_manual_input(): void
+    {
+        $hr = User::factory()->create(['role_id' => $this->roleId('hr')]);
+
+        $this->actingAs($hr)->post(route('hr.assessment-rounds.store'), [
+            'name' => 'รอบทดสอบปีอัตโนมัติ',
+            'self_assess_start' => '2027-10-01',
+            'self_assess_end' => '2027-10-15',
+            'supervisor_assess_end' => '2027-10-31',
+            'is_active' => false,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('assessment_rounds', [
+            'name' => 'รอบทดสอบปีอัตโนมัติ',
+            'year' => 2570,
+        ]);
+    }
+
+    public function test_editing_a_round_with_assessments_preserves_its_existing_year(): void
+    {
+        $hr = User::factory()->create(['role_id' => $this->roleId('hr')]);
+        $employee = User::factory()->create(['role_id' => $this->roleId('employee')]);
+        $roundId = $this->round('รอบที่มีผลประเมิน', 2569, false);
+        [, $competencyId] = $this->positionAndCompetency();
+        DB::table('assessments')->insert([
+            'assessment_round_id' => $roundId,
+            'user_id' => $employee->id,
+            'competency_id' => $competencyId,
+            'status' => 'draft',
+            'score' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($hr)->put(route('hr.assessment-rounds.update', $roundId), [
+            'name' => 'รอบที่มีผลประเมิน',
+            'self_assess_start' => '2027-01-01',
+            'self_assess_end' => '2027-01-15',
+            'supervisor_assess_end' => '2027-01-31',
+            'is_active' => false,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('assessment_rounds', [
+            'id' => $roundId,
+            'year' => 2569,
+            'self_assess_start' => '2027-01-01',
+        ]);
+    }
+
+    public function test_editing_an_unused_round_updates_its_internal_year_from_the_start_date(): void
+    {
+        $hr = User::factory()->create(['role_id' => $this->roleId('hr')]);
+        $roundId = $this->round('รอบที่ยังไม่มีผลประเมิน', 2569, false);
+
+        $this->actingAs($hr)->put(route('hr.assessment-rounds.update', $roundId), [
+            'name' => 'รอบที่ยังไม่มีผลประเมิน',
+            'self_assess_start' => '2028-01-01',
+            'self_assess_end' => '2028-01-15',
+            'supervisor_assess_end' => '2028-01-31',
+            'is_active' => false,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('assessment_rounds', [
+            'id' => $roundId,
+            'year' => 2571,
+        ]);
+    }
+
     public function test_hr_can_activate_an_existing_round_and_dashboard_receives_rounds(): void
     {
         $hr = User::factory()->create(['role_id' => $this->roleId('hr')]);

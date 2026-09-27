@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Hr;
 use App\Http\Controllers\Controller;
 use App\Services\AssessmentRoundReadinessService;
 use App\Services\CompetencyAssessmentSyncService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -59,13 +60,6 @@ class AssessmentRoundController extends Controller
 
         $data = $this->validated($request, $round);
 
-        if (DB::table('assessments')->where('assessment_round_id', $round)->exists()) {
-            $storedYear = (int) DB::table('assessment_rounds')->where('id', $round)->value('year');
-            if ((int) $data['year'] !== $storedYear) {
-                return back()->withErrors(['year' => 'ไม่สามารถเปลี่ยนปีของรอบที่เริ่มมีผลประเมินแล้ว']);
-            }
-        }
-
         DB::transaction(function () use ($data, $round): void {
             DB::table('assessment_rounds')->lockForUpdate()->get(['id']);
             DB::table('assessment_rounds')->where('id', $round)->update([
@@ -117,14 +111,13 @@ class AssessmentRoundController extends Controller
 
     private function validated(Request $request, ?int $round = null): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'name' => [
                 'required',
                 'string',
                 'max:255',
                 Rule::unique('assessment_rounds', 'name')->ignore($round),
             ],
-            'year' => ['required', 'integer', 'min:2500', 'max:2700'],
             'self_assess_start' => [Rule::requiredIf(fn (): bool => $request->boolean('is_active')), 'nullable', 'date'],
             'self_assess_end' => [Rule::requiredIf(fn (): bool => $request->boolean('is_active')), 'nullable', 'date', 'after_or_equal:self_assess_start'],
             'supervisor_assess_end' => [Rule::requiredIf(fn (): bool => $request->boolean('is_active')), 'nullable', 'date', 'after_or_equal:self_assess_end'],
@@ -133,13 +126,23 @@ class AssessmentRoundController extends Controller
         ], [
             'name.required' => 'กรุณาระบุชื่อรอบการประเมิน',
             'name.unique' => 'ชื่อรอบการประเมินนี้ถูกใช้แล้ว',
-            'year.required' => 'กรุณาระบุปีการประเมิน',
             'self_assess_start.required' => 'กรุณาระบุวันเริ่มการประเมินก่อนเปิดใช้งานรอบ',
             'self_assess_end.required' => 'กรุณาระบุวันสิ้นสุดการประเมินก่อนเปิดใช้งานรอบ',
             'supervisor_assess_end.required' => 'กรุณาระบุวันสิ้นสุดการตรวจของหัวหน้าก่อนเปิดใช้งานรอบ',
             'self_assess_end.after_or_equal' => 'วันสิ้นสุดการประเมินต้องไม่ก่อนวันเริ่มการประเมิน',
             'supervisor_assess_end.after_or_equal' => 'วันสิ้นสุดการตรวจของหัวหน้าต้องไม่ก่อนวันสิ้นสุดการประเมิน',
         ]);
+
+        $storedYear = $round ? (int) DB::table('assessment_rounds')->where('id', $round)->value('year') : null;
+        $hasAssessments = $round && DB::table('assessments')->where('assessment_round_id', $round)->exists();
+        $startDate = $data['self_assess_start'] ?? null;
+        $data['year'] = $hasAssessments
+            ? $storedYear
+            : ($startDate
+                ? CarbonImmutable::parse($startDate)->year + 543
+                : ($storedYear ?: now()->year + 543));
+
+        return $data;
     }
 
     private function roundValues(array $data, ?bool $isActive = null): array

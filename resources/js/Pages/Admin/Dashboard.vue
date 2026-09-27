@@ -67,7 +67,12 @@ const competencies = ref(clone(page.props.competencies || []));
 const users = ref(clone(page.props.users || []));
 const activeModal = ref(null);
 const editingUserKey = ref(null);
+const organizationDirty = ref(false);
 const isSavingUser = ref(false);
+const isChangingPassword = ref(false);
+const showNewPassword = ref(false);
+const showPasswordConfirmation = ref(false);
+const issuedCredentials = ref(null);
 const supervisorSearch = ref('');
 const evaluator2Search = ref('');
 const showReviewerModal = ref(false);
@@ -201,6 +206,11 @@ const roleOptions = computed(() => (page.props.roles || [
 })));
 
 const supportDeptsList = computed(() => Object.keys(supportOrg.value));
+const legacyDeptOption = computed(() => {
+    const department = userForm.value.dept;
+
+    return department && !supportDeptsList.value.includes(department) ? department : '';
+});
 const supportJobFamilies = computed(() => Object.keys(supportPositionGroups.value));
 const normalizeWorklineName = (name = '') => name.replace(/^สายงาน\s*/, '').replace(/^สาย\s*/, '').trim();
 const normalizeOptionName = (name = '') => String(name || '').trim();
@@ -239,6 +249,12 @@ const supportUnitNamesForWork = (departmentName = '', workName = '') =>
         .map(normalizeOptionName)
         .filter(Boolean);
 const selectedDeptWorks = computed(() => supportWorksForDepartment(userForm.value.dept));
+const incompleteLegacySupportPath = computed(() => {
+    if (!userForm.value.db_id || !isSupportWorkline.value || organizationDirty.value) return '';
+
+    const path = userForm.value.d;
+    return path && path.split(' > ').filter(Boolean).length < 3 ? path : '';
+});
 const jobOptions = computed(() => {
     if (!userForm.value.w) return [];
     if (isSupportWorkline.value) {
@@ -265,6 +281,11 @@ const unitOptions = computed(() => {
     return [];
 });
 const canPickPosition = computed(() => Boolean(userForm.value.w && normalizeOptionName(userForm.value.job)));
+const legacyUnitOption = computed(() => {
+    const unit = userForm.value.unit;
+
+    return unit && !unitOptions.value.includes(unit) ? unit : '';
+});
 const positionOptions = computed(() => {
     if (!canPickPosition.value) return [];
 
@@ -325,6 +346,7 @@ const visibleAdminPageIds = new Set([
     'admin-idp-tools',
     'admin-fc-topic-review',
     'admin-assessment-review',
+    'admin-team-assessment',
     'admin-idp-review',
 ]);
 const currentNavConfig = computed(() => {
@@ -340,6 +362,7 @@ const currentNavConfig = computed(() => {
         .filter((section) => section.items.length > 0);
     const assignedItems = [
         ...((fcTopicApprovalModule.value.enabled || assessmentApprovalModule.value.enabled) ? [{ id: 'admin-assessment-review', ic: '', lb: 'อนุมัติการประเมิน' }] : []),
+        ...(assessmentApprovalModule.value.enabled ? [{ id: 'admin-team-assessment', ic: '', lb: 'ผลการประเมินของทีม' }] : []),
         ...(idpReviewModule.value.enabled ? [{ id: 'admin-idp-review', ic: '', lb: 'อนุมัติแผนและผล IDP' }] : []),
     ];
 
@@ -1184,9 +1207,11 @@ const parseOrgPath = (path = '') => {
 const syncOrgPath = () => {
     const form = userForm.value;
 
-    form.d = isSupportWorkline.value
-        ? [form.dept, form.job, form.unit].filter(Boolean).join(' > ')
-        : form.job;
+    if (isSupportWorkline.value) {
+        form.d = [form.dept, form.job, form.unit].filter(Boolean).join(' > ');
+    } else if (parseOrgPath(form.d).dept !== form.job) {
+        form.d = form.job;
+    }
 };
 
 const findUserName = (predicate) => {
@@ -1203,6 +1228,7 @@ const syncOrgSupervisors = () => {
 };
 
 const resetOrgSelection = () => {
+    organizationDirty.value = true;
     userForm.value.dept = '';
     userForm.value.job = '';
     userForm.value.unit = '';
@@ -1223,6 +1249,7 @@ const handleDeptChange = (event = null) => {
     if (event?.target) {
         userForm.value.dept = event.target.value;
     }
+    organizationDirty.value = true;
     userForm.value.job = '';
     userForm.value.unit = '';
     userForm.value.p = '';
@@ -1233,6 +1260,7 @@ const handleJobChange = (event = null) => {
     if (event?.target) {
         userForm.value.job = event.target.value;
     }
+    organizationDirty.value = true;
     userForm.value.unit = '';
     userForm.value.p = '';
     if (isDeanRole.value) {
@@ -1242,10 +1270,12 @@ const handleJobChange = (event = null) => {
 };
 
 const handleUnitChange = () => {
+    organizationDirty.value = true;
     syncOrgPath();
 };
 
 const handlePositionChange = () => {
+    organizationDirty.value = true;
     userForm.value.l = '';
     const directLevels = levelsByWorkline.value[userForm.value.w] || [];
     if (!directLevels.length && userForm.value.p) {
@@ -1255,6 +1285,7 @@ const handlePositionChange = () => {
 
 const handleRoleChange = () => {
     if (isDeanRole.value && userForm.value.job) {
+        organizationDirty.value = organizationDirty.value || userForm.value.p !== userForm.value.job;
         userForm.value.p = userForm.value.job;
     }
 
@@ -1273,6 +1304,7 @@ const normalizeAcademicTitle = (title) => ({
 
 const resetUserForm = (data = null) => {
     const org = parseOrgPath(data?.d || '');
+    const supportWorkline = normalizeWorklineName(data?.w || '') === 'สนับสนุน';
     const [firstName = '', ...lastNameParts] = (data?.n || '').split(' ');
     const initialRole = normalizeUserRoleKey(data?.r || 'employee');
     const initialWorkline = data?.w || (initialRole === 'dean' ? '' : worklines.value[0] || '');
@@ -1296,6 +1328,10 @@ const resetUserForm = (data = null) => {
         : data?.d || '';
 
     editingUserKey.value = data?.sso || null;
+    organizationDirty.value = false;
+    isChangingPassword.value = !data?.db_id;
+    showNewPassword.value = false;
+    showPasswordConfirmation.value = false;
     supervisorSearch.value = '';
     evaluator2Search.value = '';
     userForm.value = {
@@ -1345,9 +1381,26 @@ const openModal = (type, data = null) => {
 const closeModal = () => {
     activeModal.value = null;
     editingUserKey.value = null;
+    userForm.value.password = '';
+    userForm.value.password_confirmation = '';
+    isChangingPassword.value = false;
+    showNewPassword.value = false;
+    showPasswordConfirmation.value = false;
 };
 
-const updateUserStatus = (targetUser) => {
+const cancelPasswordChange = () => {
+    userForm.value.password = '';
+    userForm.value.password_confirmation = '';
+    isChangingPassword.value = false;
+    showNewPassword.value = false;
+    showPasswordConfirmation.value = false;
+};
+
+const closeIssuedCredentials = () => {
+    issuedCredentials.value = null;
+};
+
+const updateUserStatus = (targetUser, callbacks = {}) => {
     if (!targetUser?.db_id) {
         alert('ไม่พบรหัสฐานข้อมูลของผู้ใช้นี้ กรุณารีเฟรชหน้าแล้วลองใหม่');
         return;
@@ -1384,6 +1437,7 @@ const updateUserStatus = (targetUser) => {
             activePage.value = 'admin-users';
             if (Array.isArray(responsePage.props.users)) {
                 users.value = clone(responsePage.props.users);
+                callbacks.onSuccess?.();
                 return;
             }
 
@@ -1392,14 +1446,20 @@ const updateUserStatus = (targetUser) => {
                 preserveScroll: true,
                 onSuccess: (reloadPage) => {
                     users.value = clone(reloadPage.props.users || users.value);
+                    callbacks.onSuccess?.();
                 },
             });
         },
         onError: (errors) => {
             users.value = previousUsers;
-            const firstError = Object.values(errors)[0];
-            alert(String(firstError || 'ไม่สามารถบันทึกสถานะผู้ใช้ลงฐานข้อมูลได้'));
+            if (callbacks.onError) {
+                callbacks.onError(errors);
+                return;
+            }
+
+            alert(String(Object.values(errors)[0] || 'ไม่สามารถบันทึกสถานะผู้ใช้ลงฐานข้อมูลได้'));
         },
+        onFinish: () => callbacks.onFinish?.(),
     });
 };
 
@@ -1411,8 +1471,11 @@ const saveUser = () => {
         window.sessionStorage.setItem(adminPageStorageKey, 'admin-users');
     }
     const form = userForm.value;
-    syncOrgPath();
-    if (isDeanRole.value && form.job) {
+    const preserveExistingStructure = Boolean(form.db_id && !organizationDirty.value);
+    if (!preserveExistingStructure) {
+        syncOrgPath();
+    }
+    if (!preserveExistingStructure && isDeanRole.value && form.job) {
         form.p = form.job;
     }
     const thaiName = [form.fn.trim(), form.ln.trim()].filter(Boolean).join(' ');
@@ -1424,6 +1487,11 @@ const saveUser = () => {
 
     if (!form.db_id && (!form.username.trim() || !form.password)) {
         alert('กรุณากำหนด Username และ Password สำหรับเข้าสู่ระบบ');
+        return;
+    }
+
+    if (form.db_id && isChangingPassword.value && !form.password) {
+        alert('กรุณากรอกรหัสผ่านใหม่ หรือยกเลิกการแก้ไขรหัสผ่าน');
         return;
     }
 
@@ -1441,7 +1509,7 @@ const saveUser = () => {
     const invalidSupportDept = isSupportWorkline.value
         && Boolean(form.dept)
         && !optionIncludes(supportDeptsList.value, form.dept);
-    if (invalidSupportDept || invalidSupportJob || invalidSupportUnit) {
+    if (!preserveExistingStructure && (invalidSupportDept || invalidSupportJob || invalidSupportUnit)) {
         alert(invalidSupportDept
             ? 'ฝ่ายนี้ไม่มีในโครงสร้างปัจจุบัน กรุณาเลือกฝ่ายใหม่ก่อนบันทึก'
             : invalidSupportJob
@@ -1462,26 +1530,26 @@ const saveUser = () => {
     const selectedOptionalPosition = !requiresPositionFields.value && canPickPosition.value && Boolean(form.p);
     const missingPosition = requiresPositionFields.value && (!form.l || (canPickPosition.value && !form.p));
     const incompleteOptionalPosition = selectedOptionalPosition && !form.l;
-    if (requiresOrganizationStructure.value && (missingOrganization || missingPosition)) {
+    if (!preserveExistingStructure && requiresOrganizationStructure.value && (missingOrganization || missingPosition)) {
         alert(isSupportWorkline.value
             ? 'กรุณาเลือกสายงาน ฝ่าย งาน หน่วย ตำแหน่ง และระดับตำแหน่งให้ครบถ้วน'
             : 'กรุณาเลือกสายงาน ภาควิชา ตำแหน่ง และระดับตำแหน่งให้ครบถ้วน');
         return;
     }
 
-    if (incompleteOptionalPosition) {
+    if (!preserveExistingStructure && incompleteOptionalPosition) {
         alert('กรุณาเลือกระดับตำแหน่งก่อนบันทึกตำแหน่งนี้');
         return;
     }
 
-    if ((requiresPositionFields.value || selectedOptionalPosition) && canPickPosition.value && !optionIncludes(positionOptions.value, form.p)) {
+    if (!preserveExistingStructure && (requiresPositionFields.value || selectedOptionalPosition) && canPickPosition.value && !optionIncludes(positionOptions.value, form.p)) {
         alert(isSupportWorkline.value
             ? 'กรุณาให้ Admin เพิ่มตำแหน่งในงานนี้ก่อนบันทึกผู้ใช้'
             : 'กรุณาให้ Admin เพิ่มตำแหน่งสำหรับภาควิชานี้ก่อนบันทึกผู้ใช้');
         return;
     }
 
-    if ((requiresPositionFields.value || form.l) && !optionIncludes(levelOptions.value, form.l)) {
+    if (!preserveExistingStructure && (requiresPositionFields.value || form.l) && !optionIncludes(levelOptions.value, form.l)) {
         alert('กรุณาให้ Admin เพิ่มระดับตำแหน่งในสายงานนี้ก่อนบันทึกผู้ใช้');
         return;
     }
@@ -1494,6 +1562,7 @@ const saveUser = () => {
 
     const nextUser = {
         ...form,
+        preserve_existing_structure: preserveExistingStructure,
         db_id: form.db_id,
         sso: form.sso.trim(),
         n: thaiName,
@@ -1520,6 +1589,14 @@ const saveUser = () => {
         idp_reviewer_ids: effectiveIdpReviewerIds.value,
         act: Boolean(form.act),
     };
+    const credentialsToShow = nextUser.password
+        ? { username: nextUser.username || nextUser.em, password: nextUser.password }
+        : null;
+
+    const finishUserSave = () => {
+        closeModal();
+        issuedCredentials.value = credentialsToShow;
+    };
 
     const onSuccess = (responsePage) => {
         activePage.value = 'admin-users';
@@ -1529,7 +1606,7 @@ const saveUser = () => {
 
         if (Array.isArray(responsePage.props.users)) {
             users.value = clone(responsePage.props.users);
-            closeModal();
+            finishUserSave();
             return;
         }
 
@@ -1538,7 +1615,7 @@ const saveUser = () => {
             preserveScroll: true,
             onSuccess: (page) => {
                 users.value = clone(page.props.users || []);
-                closeModal();
+                finishUserSave();
             },
         });
     };
@@ -1671,6 +1748,14 @@ const logout = () => router.post(route('logout'));
                 />
 
                 <HeadDashboard
+                    v-else-if="activePage === 'admin-team-assessment' && assessmentApprovalModule.enabled"
+                    embedded
+                    embedded-page="sup-gap"
+                    role-key="admin"
+                    :idp-review-items="page.props.idpReviewItems || []"
+                />
+
+                <HeadDashboard
                     v-else-if="activePage === 'admin-idp-review' && idpReviewModule.enabled"
                     embedded
                     embedded-page="dh-idp"
@@ -1795,7 +1880,7 @@ const logout = () => router.post(route('logout'));
 
                 <div class="modal-section-label">ข้อมูลเข้าสู่ระบบ</div>
                 <div class="admin-user-note login-account-note">
-                    Username ใช้เข้าสู่ระบบแทนอีเมล{{ userForm.db_id ? ' · หากไม่ต้องการเปลี่ยนรหัสผ่าน ให้เว้นช่อง Password ไว้' : '' }}
+                    Username ใช้เข้าสู่ระบบแทนอีเมล{{ userForm.db_id ? ' · รหัสเดิมเปิดดูย้อนหลังไม่ได้ หากผู้ใช้ลืม ให้กำหนดรหัสใหม่' : '' }}
                 </div>
                 <div class="modal-grid">
                     <div class="fg">
@@ -1808,26 +1893,48 @@ const logout = () => router.post(route('logout'));
                         />
                     </div>
                     <div class="fg">
-                        <label class="lbl" :class="{ req: !userForm.db_id }">Password</label>
-                        <input
-                            v-model="userForm.password"
-                            autocomplete="new-password"
-                            class="inp modal-input"
-                            :placeholder="userForm.db_id ? 'เว้นว่างเพื่อใช้รหัสเดิม' : 'อย่างน้อย 8 ตัวอักษร'"
-                            type="password"
-                        />
+                        <label class="lbl" :class="{ req: isChangingPassword }">{{ userForm.db_id && isChangingPassword ? 'Password ใหม่' : 'Password' }}</label>
+                        <div class="admin-password-input">
+                            <input
+                                v-if="!isChangingPassword"
+                                class="inp modal-input"
+                                value="ตั้งรหัสผ่านแล้ว"
+                                aria-label="สถานะรหัสผ่าน: ตั้งรหัสผ่านแล้ว"
+                                readonly
+                            />
+                            <div v-else class="admin-password-field">
+                                <input
+                                    v-model="userForm.password"
+                                    autocomplete="new-password"
+                                    class="inp modal-input"
+                                    placeholder="อย่างน้อย 8 ตัวอักษร"
+                                    :type="showNewPassword ? 'text' : 'password'"
+                                />
+                                <button class="admin-password-toggle" type="button" :aria-label="showNewPassword ? 'ซ่อนรหัสผ่านใหม่' : 'แสดงรหัสผ่านใหม่'" :aria-pressed="showNewPassword" @click="showNewPassword = !showNewPassword">
+                                    {{ showNewPassword ? 'ซ่อน' : 'แสดง' }}
+                                </button>
+                            </div>
+                            <button v-if="userForm.db_id" class="btn btn-s btn-sm" type="button" @click="isChangingPassword ? cancelPasswordChange() : isChangingPassword = true">
+                                {{ isChangingPassword ? 'ยกเลิก' : 'แก้ไขรหัสผ่าน' }}
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div class="modal-grid single-col">
+                <div v-if="isChangingPassword" class="modal-grid single-col">
                     <div class="fg">
-                        <label class="lbl" :class="{ req: !userForm.db_id }">ยืนยัน Password</label>
-                        <input
-                            v-model="userForm.password_confirmation"
-                            autocomplete="new-password"
-                            class="inp modal-input"
-                            placeholder="กรอก Password อีกครั้ง"
-                            type="password"
-                        />
+                        <label class="lbl req">ยืนยัน Password</label>
+                        <div class="admin-password-field">
+                            <input
+                                v-model="userForm.password_confirmation"
+                                autocomplete="new-password"
+                                class="inp modal-input"
+                                placeholder="กรอก Password อีกครั้ง"
+                                :type="showPasswordConfirmation ? 'text' : 'password'"
+                            />
+                            <button class="admin-password-toggle" type="button" :aria-label="showPasswordConfirmation ? 'ซ่อนรหัสผ่านที่ยืนยัน' : 'แสดงรหัสผ่านที่ยืนยัน'" :aria-pressed="showPasswordConfirmation" @click="showPasswordConfirmation = !showPasswordConfirmation">
+                                {{ showPasswordConfirmation ? 'ซ่อน' : 'แสดง' }}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -1877,6 +1984,9 @@ const logout = () => router.post(route('logout'));
                 </div>
 
                 <div v-if="requiresOrganizationStructure" class="modal-section-label">โครงสร้างสังกัด</div>
+                <div v-if="requiresOrganizationStructure && incompleteLegacySupportPath" class="modal-help warning">
+                    สังกัดเดิม: {{ incompleteLegacySupportPath }} (ข้อมูลเดิมไม่ครบลำดับฝ่าย งาน และหน่วย หากไม่แก้สังกัด ระบบจะคงค่าเดิมไว้)
+                </div>
                 <div v-if="requiresOrganizationStructure" class="modal-grid" :class="{ 'single-col': !userForm.w }">
                     <div class="fg">
                         <label class="lbl req">สายงาน</label>
@@ -1892,6 +2002,9 @@ const logout = () => router.post(route('logout'));
                         <label class="lbl req">ฝ่าย</label>
                         <select v-model="userForm.dept" class="sel modal-input" @change="handleDeptChange">
                             <option value="">— เลือกฝ่าย —</option>
+                            <option v-if="legacyDeptOption" :value="legacyDeptOption">
+                                {{ legacyDeptOption }} (ข้อมูลเดิม)
+                            </option>
                             <option v-for="department in supportDeptsList" :key="department" :value="department">{{ department }}</option>
                         </select>
                     </div>
@@ -1908,7 +2021,7 @@ const logout = () => router.post(route('logout'));
                             </option>
                         </select>
                         <div v-if="legacyJobOption" class="modal-help warning">
-                            {{ isSupportWorkline ? 'งาน' : 'ภาควิชา' }}นี้ไม่มีในโครงสร้างปัจจุบัน กรุณาเลือกใหม่ก่อนบันทึก
+                            {{ isSupportWorkline ? 'งาน' : 'ภาควิชา' }}นี้ไม่มีในโครงสร้างปัจจุบัน หากเปลี่ยนสังกัดกรุณาเลือกใหม่
                         </div>
                     </div>
 
@@ -1916,6 +2029,9 @@ const logout = () => router.post(route('logout'));
                         <label class="lbl" :class="{ req: requiresSupportUnit }">หน่วย</label>
                         <select v-model="userForm.unit" class="sel modal-input" @change="handleUnitChange">
                             <option value="">— เลือกหน่วย —</option>
+                            <option v-if="legacyUnitOption" :value="legacyUnitOption">
+                                {{ legacyUnitOption }} (ข้อมูลเดิม)
+                            </option>
                             <option v-for="unit in unitOptions" :key="unit" :value="unit">{{ unit }}</option>
                         </select>
                     </div>
@@ -1956,7 +2072,7 @@ const logout = () => router.post(route('logout'));
                     </div>
                     <div class="fg">
                         <label class="lbl" :class="{ req: requiresPositionFields }">ระดับตำแหน่ง</label>
-                        <select v-model="userForm.l" class="sel modal-input" :disabled="!levelOptions.length && !legacyLevelOption">
+                        <select v-model="userForm.l" class="sel modal-input" :disabled="!levelOptions.length && !legacyLevelOption" @change="organizationDirty = true">
                             <option v-if="levelOptions.length" value="">— เลือกระดับตำแหน่ง —</option>
                             <option v-else value="">ยังไม่มีระดับตำแหน่งในสายงานหรือกลุ่มงาน</option>
                             <option v-if="legacyLevelOption" :value="legacyLevelOption">
@@ -1967,7 +2083,7 @@ const logout = () => router.post(route('logout'));
                             </option>
                         </select>
                         <div v-if="legacyLevelOption" class="modal-help warning">
-                            ระดับตำแหน่งนี้ไม่มีในโครงสร้างปัจจุบัน กรุณาเลือกระดับใหม่ก่อนบันทึก
+                            ระดับตำแหน่งนี้ไม่มีในโครงสร้างปัจจุบัน หากเปลี่ยนสังกัดกรุณาเลือกใหม่
                         </div>
                         <div v-if="!levelOptions.length" class="modal-help">
                             กรุณาให้ Admin เพิ่มระดับตำแหน่งก่อนกำหนดผู้ใช้
@@ -2132,6 +2248,28 @@ const logout = () => router.post(route('logout'));
                     <button class="btn btn-p modal-action-btn modal-save-btn" type="button" @click="saveUser">
                          บันทึก
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="issuedCredentials" class="mo admin-user-modal">
+        <div class="mo-box issued-credentials-box" role="dialog" aria-modal="true" aria-labelledby="issued-credentials-title">
+            <div class="mo-h admin-user-modal-head">
+                <div class="fw8 fs18" id="issued-credentials-title">ข้อมูลเข้าสู่ระบบที่เพิ่งกำหนด</div>
+            </div>
+            <div class="mo-b admin-user-modal-body">
+                <p class="issued-credentials-note">แจ้งข้อมูลนี้ให้ผู้ใช้ก่อนปิดหน้าต่าง รหัสผ่านเดิมจะเปิดดูย้อนหลังไม่ได้ หากลืมรหัสให้ Admin กำหนดใหม่</p>
+                <div class="fg">
+                    <label class="lbl">Username</label>
+                    <input class="inp modal-input" :value="issuedCredentials.username" readonly />
+                </div>
+                <div class="fg">
+                    <label class="lbl">Password</label>
+                    <input class="inp modal-input" :value="issuedCredentials.password" readonly />
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-p modal-action-btn" type="button" @click="closeIssuedCredentials">รับทราบและปิด</button>
                 </div>
             </div>
         </div>
@@ -2547,6 +2685,64 @@ const logout = () => router.post(route('logout'));
     background: #eff6ff;
     color: #2563eb;
     font-size: 13px;
+}
+
+.admin-password-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.admin-password-input .inp {
+    min-width: 0;
+    flex: 1;
+}
+
+.admin-password-field {
+    position: relative;
+    min-width: 0;
+    flex: 1;
+}
+
+.admin-password-field .inp {
+    width: 100%;
+    padding-right: 72px;
+}
+
+.admin-password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    min-height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--navy);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.admin-password-toggle:hover,
+.admin-password-toggle:focus-visible {
+    background: #eef2f7;
+}
+
+.issued-credentials-box {
+    max-width: 480px;
+}
+
+.issued-credentials-box .fg {
+    margin-bottom: 14px;
+}
+
+.issued-credentials-note {
+    margin: 0 0 18px;
+    color: var(--text2);
+    font-size: 13px;
+    line-height: 1.55;
 }
 
 .admin-user-warning {

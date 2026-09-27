@@ -34,6 +34,11 @@
     </div>
   </div>
 
+  <div v-if="statusFeedback" class="status-feedback" :class="statusFeedback.kind" role="status" aria-live="polite">
+    <span>{{ statusFeedback.message }}</span>
+    <button type="button" class="status-feedback-close" aria-label="ปิดข้อความแจ้ง" @click="statusFeedback = null">×</button>
+  </div>
+
   <div class="card mb14">
     <div class="ch filter-row">
       <input v-model="search" class="inp search-input" placeholder=" ค้นหาชื่อ / ID..." />
@@ -162,7 +167,7 @@
             </td>
             <td class="center-cell">
               <span class="b" :class="isActive(user) ? 'bg' : 'br'">
-                {{ isActive(user) ? 'ปกติ' : 'ระงับ' }}
+                {{ isActive(user) ? 'ใช้งานอยู่' : 'ระงับแล้ว' }}
               </span>
             </td>
             <td class="right-cell">
@@ -171,14 +176,14 @@
                   แก้ไข
                 </button>
                 <button
-                  class="btn btn-r btn-xs status-btn"
+                  class="btn btn-xs status-btn"
                   type="button"
-                  :class="isActive(user) ? 'suspend' : 'activate'"
-                  :disabled="isStatusActionDisabled(user)"
+                  :class="isActive(user) ? 'btn-r suspend' : 'btn-g activate'"
+                  :disabled="updatingStatusId !== null || isStatusActionDisabled(user)"
                   :title="statusActionTitle(user)"
                   @click.stop="toggleStatus(user)"
                 >
-                  {{ isActive(user) ? 'ระงับ' : 'เปิด' }}
+                  {{ updatingStatusId === user.db_id ? 'กำลังบันทึก...' : (isActive(user) ? 'ระงับ' : 'เปิดใช้งาน') }}
                 </button>
               </div>
             </td>
@@ -225,7 +230,11 @@ type RoleBadge = {
 const props = defineProps<{
   openModal: (type: string, data?: unknown) => void;
   openReviewerTemplateModal: (chainType?: string) => void;
-  updateUserStatus: (user: User) => void;
+  updateUserStatus: (user: User, callbacks?: {
+    onSuccess?: () => void;
+    onError?: (errors: Record<string, string>) => void;
+    onFinish?: () => void;
+  }) => void;
   users: User[];
   setUsers: (next: User[] | ((users: User[]) => User[])) => void;
   academicDepts: string[];
@@ -252,6 +261,8 @@ const supportUnitFilter = ref(allSupportUnitsLabel);
 const positionFilter = ref(allPositionsLabel);
 const roleFilter = ref(allRolesLabel);
 const statusFilter = ref(allStatusesLabel);
+const updatingStatusId = ref<number | null>(null);
+const statusFeedback = ref<{ kind: 'success' | 'suspended' | 'error'; message: string } | null>(null);
 const page = usePage();
 const currentUserId = computed(() => Number(page.props.auth?.user?.id || 0));
 const roleOptions = [
@@ -461,25 +472,81 @@ const filteredUsers = computed(() => {
 
 const toggleStatus = (user: User) => {
   if (!user.db_id) {
-    alert('ไม่พบรหัสฐานข้อมูลของผู้ใช้นี้ กรุณารีเฟรชหน้าแล้วลองใหม่');
+    statusFeedback.value = { kind: 'error', message: 'ไม่พบรหัสฐานข้อมูลของผู้ใช้นี้ กรุณารีเฟรชหน้าแล้วลองใหม่' };
     return;
   }
 
   if (isStatusActionDisabled(user)) {
-    if (isAdminRole(user)) {
-      alert('ไม่สามารถระงับบัญชีผู้ดูแลระบบได้');
-      return;
-    }
-    alert('ไม่สามารถระงับบัญชีที่กำลังใช้งานอยู่ได้');
+    statusFeedback.value = {
+      kind: 'error',
+      message: isAdminRole(user)
+        ? 'ไม่สามารถระงับบัญชีผู้ดูแลระบบได้'
+        : 'ไม่สามารถระงับบัญชีที่กำลังใช้งานอยู่ได้',
+    };
     return;
   }
 
-  props.updateUserStatus(user);
+  const nextActive = !isActive(user);
+  updatingStatusId.value = user.db_id;
+  statusFeedback.value = null;
+
+  props.updateUserStatus(user, {
+    onSuccess: () => {
+      statusFeedback.value = {
+        kind: nextActive ? 'success' : 'suspended',
+        message: `${nextActive ? 'เปิดใช้งาน' : 'ระงับ'}บัญชี ${user.n} เรียบร้อยแล้ว`,
+      };
+    },
+    onError: (errors) => {
+      statusFeedback.value = {
+        kind: 'error',
+        message: errors.act || Object.values(errors)[0] || 'ไม่สามารถบันทึกสถานะผู้ใช้ได้ กรุณาลองใหม่อีกครั้ง',
+      };
+    },
+    onFinish: () => { updatingStatusId.value = null; },
+  });
 };
 
 </script>
 
 <style scoped>
+.status-feedback {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1100;
+  max-width: min(420px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+}
+
+.status-feedback.suspended,
+.status-feedback.error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.status-feedback-close {
+  margin: -4px -5px -4px auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+
 .admin-users-head {
   display: flex;
   align-items: flex-start;

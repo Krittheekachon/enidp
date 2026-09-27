@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class ProfileTest extends TestCase
@@ -18,91 +20,66 @@ class ProfileTest extends TestCase
             ->actingAs($user)
             ->get('/profile');
 
-        $response->assertOk();
+        $response->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->component('Profile/Edit')
+            ->where('profileUser.db_id', $user->id)
+            ->missing('status')
+        );
     }
 
-    public function test_profile_information_can_be_updated(): void
-    {
-        $user = User::factory()->create();
-
-        $response = $this
-            ->actingAs($user)
-            ->patch('/profile', [
-                'name' => 'Test User',
-                'email' => 'test@example.com',
-            ]);
-
-        $response
-            ->assertSessionHasNoErrors()
-            ->assertRedirect('/profile');
-
-        $user->refresh();
-
-        $this->assertSame('Test User', $user->name);
-        $this->assertSame('test@example.com', $user->email);
-        $this->assertNull($user->email_verified_at);
-    }
-
-    public function test_email_verification_status_is_unchanged_when_the_email_address_is_unchanged(): void
-    {
-        $user = User::factory()->create();
-
-        $response = $this
-            ->actingAs($user)
-            ->patch('/profile', [
-                'name' => 'Test User',
-                'email' => $user->email,
-            ]);
-
-        $response
-            ->assertSessionHasNoErrors()
-            ->assertRedirect('/profile');
-
-        $this->assertNotNull($user->refresh()->email_verified_at);
-    }
-
-    public function test_profile_update_cannot_change_admin_owned_organization_fields(): void
+    public function test_employee_cannot_update_their_own_profile(): void
     {
         $user = User::factory()->create([
+            'name' => 'ชื่อเดิม',
+            'email' => 'original@example.com',
             'workline' => 'สายวิชาการ',
             'department' => 'ภาควิชาคอมพิวเตอร์',
             'position' => 'อาจารย์',
             'level' => 'ระดับ 1',
+            'sso' => 'personnel-001',
         ]);
+        $verifiedAt = $user->email_verified_at;
 
         $this->actingAs($user)
             ->patch('/profile', [
-                'name' => $user->name,
-                'email' => $user->email,
+                'name' => 'Test User',
+                'email' => 'test@example.com',
                 'workline' => 'สายสนับสนุน',
                 'department' => 'ฝ่ายปลอม',
                 'position' => 'ตำแหน่งปลอม',
                 'level' => 'ระดับเฉพาะปลอม',
+                'sso' => 'changed-by-user',
+                'profile_photo' => 'data:image/png;base64,ZmFrZQ==',
             ])
-            ->assertSessionHasNoErrors()
-            ->assertRedirect('/profile');
+            ->assertForbidden();
 
         $user->refresh();
 
+        $this->assertSame('ชื่อเดิม', $user->name);
+        $this->assertSame('original@example.com', $user->email);
+        $this->assertSame($verifiedAt?->toDateTimeString(), $user->email_verified_at?->toDateTimeString());
         $this->assertSame('สายวิชาการ', $user->workline);
         $this->assertSame('ภาควิชาคอมพิวเตอร์', $user->department);
         $this->assertSame('อาจารย์', $user->position);
         $this->assertSame('ระดับ 1', $user->level);
+        $this->assertSame('personnel-001', $user->sso);
+        $this->assertNull($user->profile_photo);
     }
 
-    public function test_profile_update_can_not_change_admin_owned_personnel_id(): void
+    public function test_admin_also_uses_user_management_instead_of_self_service_profile_update(): void
     {
-        $user = User::factory()->create(['sso' => 'personnel-001']);
+        $adminRoleId = DB::table('roles')->where('key', 'admin')->value('id');
+        $user = User::factory()->create(['role_id' => $adminRoleId]);
+        $originalName = $user->name;
 
         $this->actingAs($user)
             ->patch('/profile', [
-                'name' => $user->name,
+                'name' => 'Test User',
                 'email' => $user->email,
-                'sso' => 'changed-by-user',
             ])
-            ->assertSessionHasNoErrors();
+            ->assertForbidden();
 
-        $this->assertSame('personnel-001', $user->refresh()->sso);
+        $this->assertSame($originalName, $user->refresh()->name);
     }
 
     public function test_user_can_not_delete_their_account(): void

@@ -103,7 +103,7 @@ const formatDate = (value) => value
         <section v-else class="empty-state">
             <div class="empty-icon">✓</div>
             <h2>ไม่มีหัวข้อรออนุมัติ</h2>
-            <p>เมื่อบุคลากรที่คุณดูแลส่งหัวข้อ FC รายการจะปรากฏที่หน้านี้</p>
+            <p>{{ module.enabled ? 'เมื่อบุคลากรที่คุณดูแลส่งหัวข้อ FC รายการจะปรากฏที่หน้านี้' : 'หัวข้อ FC จะส่งให้ผู้ตรวจลำดับแรก ส่วนผลการประเมินจะปรากฏในแท็บถัดไปเมื่อถึงลำดับของคุณ' }}</p>
         </section>
 
         <div v-if="selected" class="modal-backdrop" @click.self="closeDecision">

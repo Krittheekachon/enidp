@@ -50,6 +50,18 @@ class AssessmentReviewerChainTest extends TestCase
                 ->where('assessmentApprovalModule.items.0.organizationLabel', 'หน่วย')
                 ->where('assessmentApprovalModule.items.0.organization', 'ทดสอบหน่วย')
                 ->where('assessmentApprovalModule.items.0.competencies.0.competencyId', $competencyId)
+                ->where('reviewerTeamUsers', function ($users) use ($reviewer, $employee): bool {
+                    $rows = collect($users);
+                    $assigned = $rows->firstWhere('db_id', $employee->id);
+
+                    return $rows->pluck('db_id')->sort()->values()->all() === collect([
+                        $reviewer->id,
+                        $employee->id,
+                    ])->sort()->values()->all()
+                        && ! array_key_exists('em', $assigned)
+                        && ! array_key_exists('username', $assigned)
+                        && ! array_key_exists('ph', $assigned);
+                })
                 ->missing('users')
             );
     }
@@ -81,6 +93,7 @@ class AssessmentReviewerChainTest extends TestCase
                 ->where('assessmentApprovalModule.enabled', false)
                 ->where('idpReviewModule.enabled', true)
                 ->where('idpReviewModule.assignmentCount', 1)
+                ->where('reviewerTeamUsers', null)
             );
     }
 
@@ -98,6 +111,9 @@ class AssessmentReviewerChainTest extends TestCase
             $employee = User::factory()->create([
                 'role_id' => $this->roleId('employee'),
             ]);
+            $unassignedEmployee = User::factory()->create([
+                'role_id' => $this->roleId('employee'),
+            ]);
             $this->assignAssessmentReviewers($employee, [1 => $reviewer->id]);
             $competencyId = $this->competencyId('CC-'.strtoupper($roleKey).'-REVIEWER');
             $assessment = $this->assessment($employee, $competencyId, 'self_submitted');
@@ -110,7 +126,68 @@ class AssessmentReviewerChainTest extends TestCase
                     ->component($component)
                     ->where('assessmentApprovalModule.enabled', true)
                     ->where('assessmentApprovalModule.items.0.employeeId', $employee->id)
+                    ->where('reviewerTeamUsers', fn ($users): bool => collect($users)
+                        ->pluck('db_id')->sort()->values()->all() === collect([
+                            $reviewer->id,
+                            $employee->id,
+                        ])->sort()->values()->all()
+                        && ! collect($users)->contains('db_id', $unassignedEmployee->id))
                 );
+        }
+    }
+
+    public function test_every_non_head_role_gets_both_reviewer_modules_when_assigned_to_both_chains(): void
+    {
+        foreach ([
+            'employee' => 'Employee/Dashboard',
+            'admin' => 'Admin/Dashboard',
+            'hr' => 'HR/Dashboard',
+            'dean' => 'Executive/Dashboard',
+        ] as $roleKey => $component) {
+            $reviewer = User::factory()->create(['role_id' => $this->roleId($roleKey)]);
+            $assessmentMember = User::factory()->create(['role_id' => $this->roleId('employee')]);
+            $idpOnlyMember = User::factory()->create(['role_id' => $this->roleId('employee')]);
+            $this->assignAssessmentReviewers($assessmentMember, [1 => $reviewer->id]);
+            $competencyId = $this->competencyId('CC-ALL-ROLES-'.strtoupper($roleKey));
+            $assessment = $this->assessment($assessmentMember, $competencyId, 'self_submitted');
+            $assessment->forceFill(['last_draft_saved_at' => now()])->save();
+            DB::table('user_reviewer_steps')->insert([
+                'user_id' => $idpOnlyMember->id,
+                'reviewer_id' => $reviewer->id,
+                'step_order' => 1,
+                'chain_type' => 'idp',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $this->actingAs($reviewer)
+                ->get(route('dashboard'))
+                ->assertOk()
+                ->assertInertia(fn (Assert $page) => $page
+                    ->component($component)
+                    ->where('assessmentApprovalModule.enabled', true)
+                    ->where('assessmentApprovalModule.pendingCount', 1)
+                    ->where('assessmentApprovalModule.items.0.employeeId', $assessmentMember->id)
+                    ->where('idpReviewModule.enabled', true)
+                    ->where('teamIdpAnalytics.round.id', $this->assessmentRoundId())
+                    ->where('reviewerTeamUsers', fn ($users): bool => collect($users)
+                        ->pluck('db_id')->sort()->values()->all() === collect([
+                            $reviewer->id,
+                            $assessmentMember->id,
+                        ])->sort()->values()->all()
+                        && ! collect($users)->contains('db_id', $idpOnlyMember->id))
+                );
+
+            $this->actingAs($reviewer)
+                ->post(route('assessments.approve'), [
+                    'user_id' => $assessmentMember->id,
+                    'competency_id' => $competencyId,
+                ])
+                ->assertSessionHasNoErrors();
+            $this->assertDatabaseHas('assessments', [
+                'id' => $assessment->id,
+                'status' => 'approved',
+            ]);
         }
     }
 
@@ -204,6 +281,74 @@ class AssessmentReviewerChainTest extends TestCase
                 ->where('assessmentApprovalModule.items.0.allCompetencies.0.workflow.currentReviewerName', 'นายผู้ประเมินลำดับหนึ่ง')
                 ->where('assessmentApprovalModule.items.0.allCompetencies.0.workflow.timeline.1.state', 'active')
                 ->where('assessmentApprovalModule.items.0.allCompetencies.0.workflow.timeline.2.state', 'waiting')
+            );
+    }
+
+    public function test_division_head_receives_every_assigned_member_even_before_their_review_step(): void
+    {
+        $firstReviewer = User::factory()->create(['role_id' => $this->roleId('supervisor')]);
+        $divisionHead = User::factory()->create(['role_id' => $this->roleId('division_head')]);
+        $employees = User::factory()->count(2)->create(['role_id' => $this->roleId('employee')]);
+
+        foreach ($employees as $employee) {
+            $this->assignAssessmentReviewers($employee, [1 => $firstReviewer->id, 3 => $divisionHead->id]);
+        }
+
+        $this->actingAs($divisionHead)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Super/Dashboard')
+                ->where('assessmentApprovalModule.enabled', true)
+                ->where('assessmentApprovalModule.pendingCount', 0)
+                ->has('assessmentApprovalModule.items', 2)
+                ->has('users', 3)
+                ->where('assessmentApprovalModule.items.0.isPending', false)
+                ->where('assessmentApprovalModule.items.1.isPending', false)
+            );
+    }
+
+    public function test_later_reviewer_receives_unsubmitted_position_competencies_alongside_saved_results(): void
+    {
+        $firstReviewer = User::factory()->create(['role_id' => $this->roleId('supervisor')]);
+        $divisionHead = User::factory()->create(['role_id' => $this->roleId('division_head')]);
+        $employee = User::factory()->create(['role_id' => $this->roleId('employee')]);
+        $this->assignAssessmentReviewers($employee, [1 => $firstReviewer->id, 3 => $divisionHead->id]);
+
+        $worklineId = DB::table('worklines')->insertGetId([
+            'name' => 'สายทดสอบ', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $jobFamilyId = DB::table('job_families')->insertGetId([
+            'workline_id' => $worklineId, 'name' => 'กลุ่มงานทดสอบ', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $positionId = DB::table('positions')->insertGetId([
+            'job_family_id' => $jobFamilyId, 'name' => 'ตำแหน่งทดสอบ', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $employee->forceFill(['position_id' => $positionId])->save();
+
+        $savedCompetencyId = $this->competencyId('CC-SAVED');
+        $unsubmittedCompetencyId = $this->competencyId('FC1-UNSUBMITTED');
+        foreach ([$savedCompetencyId, $unsubmittedCompetencyId] as $competencyId) {
+            DB::table('position_competencies')->insert([
+                'assessment_round_id' => $this->assessmentRoundId(),
+                'position_id' => $positionId,
+                'competency_id' => $competencyId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+        $this->assessment($employee, $savedCompetencyId, 'self_submitted')
+            ->forceFill(['last_draft_saved_at' => now()])->save();
+
+        $this->actingAs($divisionHead)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Super/Dashboard')
+                ->where('assessmentApprovalModule.items.0.employeeId', $employee->id)
+                ->has('assessmentApprovalModule.items.0.allCompetencies', 1)
+                ->has('assessmentApprovalModule.items.0.assignedCompetencies', 2)
+                ->where('assessmentApprovalModule.items.0.nextStatus', 'approved')
             );
     }
 

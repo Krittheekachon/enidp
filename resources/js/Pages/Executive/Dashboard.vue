@@ -46,7 +46,8 @@ const sections = computed(() => {
     ];
     const assignedItems = [
         ...((fcTopicApprovalModule.value.enabled || assessmentApprovalModule.value.enabled) ? [{ id: 'manager-assessment-approval', icon: '', label: 'อนุมัติการประเมิน' }] : []),
-        ...(idpReviewModule.value.enabled ? [{ id: 'manager-idp-approval', icon: '', label: 'แผนและผล IDP' }] : []),
+        ...(assessmentApprovalModule.value.enabled ? [{ id: 'manager-team-assessment', icon: '', label: 'ผลการประเมินของทีม' }] : []),
+        ...(idpReviewModule.value.enabled ? [{ id: 'manager-idp-approval', icon: '', label: 'อนุมัติแผนและผล IDP' }] : []),
     ];
 
     if (assignedItems.length) {
@@ -61,6 +62,7 @@ const pageTitles = {
     'faculty-idp-tracking': 'การติดตาม IDP',
     'manager-fc-topic-approval': 'พิจารณาหัวข้อการประเมิน',
     'manager-assessment-approval': 'อนุมัติการประเมิน',
+    'manager-team-assessment': 'ผลการประเมินของทีม',
     'manager-idp-approval': 'อนุมัติแผนและผล IDP',
 };
 
@@ -140,6 +142,13 @@ const logout = () => router.post(route('logout'));
                     v-else-if="activePage === 'manager-assessment-approval' && (fcTopicApprovalModule.enabled || assessmentApprovalModule.enabled)"
                     embedded
                     embedded-page="dh-assess"
+                    role-key="dean"
+                    :idp-review-items="page.props.idpReviewItems || []"
+                />
+                <HeadDashboard
+                    v-else-if="activePage === 'manager-team-assessment' && assessmentApprovalModule.enabled"
+                    embedded
+                    embedded-page="sup-gap"
                     role-key="dean"
                     :idp-review-items="page.props.idpReviewItems || []"
                 />

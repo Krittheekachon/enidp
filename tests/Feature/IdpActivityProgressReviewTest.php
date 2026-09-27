@@ -252,6 +252,47 @@ class IdpActivityProgressReviewTest extends TestCase
                 ->missing('idpProgressReviewItems.0.activities.0.updates.1'));
     }
 
+    public function test_team_tracking_shows_draft_plan_activities_without_opening_progress(): void
+    {
+        [$reviewer, , $activityId] = $this->pendingCompletion();
+        $itemId = (int) DB::table('idp_activities')->where('id', $activityId)->value('idp_item_id');
+        DB::table('idp_items')->where('id', $itemId)->update(['status' => 'draft']);
+
+        $this->actingAs($reviewer)->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('idpProgressReviewItems.0.planStatus', 'draft')
+                ->where('idpProgressReviewItems.0.activities.0.name', 'โครงการพัฒนาระบบ')
+                ->where('idpProgressReviewItems.0.activities.0.planDetails.planRows.0.assignmentTopic', 'พัฒนาระบบ')
+                ->has('idpProgressReviewItems.0.activities.0.updates', 0)
+                ->where('idpProgressReviewItems.0.activities.0.completion', null)
+                ->where('idpProgressReviewItems.0.completionPublicId', null)
+                ->where('idpProgressReviewItems.0.dueDate', null)
+                ->where('idpProgressReviewItems.0.canReview', false)
+                ->where('teamIdpAnalytics.idpDetails.0.planStatus', 'draft')
+                ->where('teamIdpAnalytics.idpDetails.0.activities.0.name', 'โครงการพัฒนาระบบ')
+                ->has('teamIdpAnalytics.idpDetails.0.activities.0.updates', 0));
+    }
+
+    public function test_team_tracking_names_the_current_plan_approver(): void
+    {
+        [$reviewer, , $activityId] = $this->pendingCompletion();
+        $itemId = (int) DB::table('idp_activities')->where('id', $activityId)->value('idp_item_id');
+        DB::table('idp_items')->where('id', $itemId)->update([
+            'status' => 'review_step_1',
+            'current_review_step' => 1,
+        ]);
+
+        $this->actingAs($reviewer)->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('teamIdpAnalytics.idpSummary.states.plan_review', 1)
+                ->where('teamIdpAnalytics.idpDetails.0.planStatus', 'review_step_1')
+                ->where('teamIdpAnalytics.idpDetails.0.planCurrentReviewStep', 1)
+                ->where('teamIdpAnalytics.idpDetails.0.planCurrentReviewerName', $reviewer->name)
+                ->where('idpProgressReviewItems.0.planCurrentReviewerName', $reviewer->name));
+    }
+
     public function test_reviewer_dashboard_shows_every_failed_competency_even_before_an_idp_plan_exists(): void
     {
         [$reviewer, , $activityId] = $this->pendingCompletion();
