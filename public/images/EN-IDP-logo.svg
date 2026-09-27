@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 410" role="img" aria-label="EN-IDP logo">
+  <title>EN-IDP — Competency &amp; IDP System</title>
+  <g fill="#75292D">
+    <path d="M185 65 47 127v135h153v-29H79v-24l106-47v-31L79 178v-29l106-47z"/>
+    <path d="M205 65h23l105 122V109l28-13v166h-30L233 149v113h-28z"/>
+  </g>
+  <g fill="none" stroke="#75292D" stroke-width="4" stroke-linejoin="miter" stroke-linecap="square">
+    <path d="M375 261V119l53-25v168m-38-8V130l22-10v135m16-95 22 10v92m-22-50 72 41v9"/>
+  </g>
+  <text x="320" y="329" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="63" font-weight="700" letter-spacing="1">EN-IDP</text>
+  <text x="320" y="371" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="20" letter-spacing="5">COMPETENCY &amp; IDP SYSTEM</text>
+</svg>
