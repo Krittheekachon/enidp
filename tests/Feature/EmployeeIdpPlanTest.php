@@ -15,7 +15,7 @@ class EmployeeIdpPlanTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const DEV_NOTIFICATION_RECIPIENT = 'krittheekachon.s@kkumail.com';
+    private const DEV_NOTIFICATION_RECIPIENT = 'developer@example.test';
 
     public function test_employee_can_save_one_competency_plan_with_multiple_activities(): void
     {

@@ -67,10 +67,24 @@ Open:
 http://127.0.0.1:8000
 ```
 
-Local mock SSO is available at:
+To enable the local mock SSO explicitly, set:
+
+```env
+MOCK_SSO_ENABLED=true
+```
+
+It will then be available at:
 
 ```text
 http://127.0.0.1:8000/mock-sso
+```
+
+Email notifications are disabled by default. Enable them only after configuring a safe recipient:
+
+```env
+MAIL_NOTIFICATIONS_ENABLED=true
+MAIL_SEND_TO_REAL_USERS=false
+MAIL_DEV_TO=developer@example.test
 ```
 
 ## Database

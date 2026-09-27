@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Mail\AdminDailyDigestMail;
 use App\Mail\HrDailyDigestMail;
 use App\Mail\NewUserDigestMail;
-use App\Mail\UnmappedPositionDigestMail;
 use App\Mail\UnmappedPositionUserDigestMail;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,16 +18,21 @@ use Throwable;
 class NotificationDigestService
 {
     private const NEW_USERS_KEY = 'digest_new_users';
+
     private const UNMAPPED_POSITIONS_KEY = 'digest_unmapped_positions';
+
     private const UNMAPPED_POSITION_USERS_KEY = 'digest_unmapped_position_users';
+
     private const DAILY_SENT_KEY = 'digest_daily_sent_on';
 
-    public function __construct(private NotificationRecipientResolver $recipientResolver)
-    {
-    }
+    public function __construct(private NotificationRecipientResolver $recipientResolver) {}
 
     public function queueIncompleteUser(User $user): void
     {
+        if (! $this->isNotificationEnabled()) {
+            return;
+        }
+
         $users = Cache::get(self::NEW_USERS_KEY, []);
         $users[$user->id] = $this->userSummary($user);
 
@@ -42,6 +46,10 @@ class NotificationDigestService
 
     public function queueUnmappedPosition(string $name): void
     {
+        if (! $this->isNotificationEnabled()) {
+            return;
+        }
+
         $positions = Cache::get(self::UNMAPPED_POSITIONS_KEY, []);
         $positions[$name] = $name;
 
@@ -55,6 +63,10 @@ class NotificationDigestService
 
     public function queueUserWithUnmappedPosition(User $user): void
     {
+        if (! $this->isNotificationEnabled()) {
+            return;
+        }
+
         $users = Cache::get(self::UNMAPPED_POSITION_USERS_KEY, []);
         $users[$user->id] = $this->userSummary($user);
 
@@ -337,6 +349,10 @@ class NotificationDigestService
 
     private function isNotificationEnabled(): bool
     {
+        if (! config('mail.notifications_enabled', false)) {
+            return false;
+        }
+
         return ! app()->environment('local') || Cache::get('dev_notifications_enabled', true) !== false;
     }
 

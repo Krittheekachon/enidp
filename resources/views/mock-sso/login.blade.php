@@ -93,7 +93,7 @@
       </div>
 
       <div class="mail-test">
-        <div class="mail-title">ทดสอบแจ้งเตือน reviewer 1 ไปที่ krittheekachon.s@kkumail.com · reviewer 2/3 ไปที่ chin172755@gmail.com</div>
+        <div class="mail-title">ทดสอบแจ้งเตือนไปยังอีเมลที่กำหนดใน MAIL_DEV_TO</div>
         <div class="mail-grid">
           @foreach($mailTests as $type => $label)
             <form method="POST" action="{{ route('mock.sso.test-notification') }}">

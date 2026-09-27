@@ -16,6 +16,8 @@ class MockSsoLoginTest extends TestCase
     {
         parent::setUp();
 
+        $this->assertNull(Route::getRoutes()->getByName('mock.sso'));
+
         Route::post('/_test/mock-sso', [MockSsoController::class, 'login'])
             ->middleware('web');
     }

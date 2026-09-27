@@ -11,6 +11,7 @@ use App\Mail\UnmappedPositionDigestMail;
 use App\Mail\UnmappedPositionUserDigestMail;
 use App\Models\User;
 use App\Services\NotificationDigestService;
+use App\Services\NotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +21,23 @@ use Tests\TestCase;
 class NotificationDigestServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_notification_switch_stops_immediate_and_digest_notifications(): void
+    {
+        Mail::fake();
+        Cache::flush();
+        config(['mail.notifications_enabled' => false]);
+
+        $user = User::factory()->create();
+        $digest = app(NotificationDigestService::class);
+
+        $digest->queueIncompleteUser($user);
+        $digest->sendHourlyDigest();
+
+        $this->assertFalse(app(NotificationService::class)->isNotificationEnabled());
+        $this->assertFalse(Cache::has('digest_new_users'));
+        Mail::assertNothingSent();
+    }
 
     public function test_daily_digest_sends_one_combined_email_per_role(): void
     {

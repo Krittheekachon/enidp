@@ -131,7 +131,7 @@ php artisan serve --host=127.0.0.1 --port=8000
 npm run dev -- --host 127.0.0.1
 ```
 
-Then open `/mock-sso`, choose the required role, and verify visible layout, empty states, validation, disabled states, save behavior, refreshed server data, and mobile/desktop overflow.
+Set `MOCK_SSO_ENABLED=true`, then open `/mock-sso`, choose the required role, and verify visible layout, empty states, validation, disabled states, save behavior, refreshed server data, and mobile/desktop overflow.
 
 ## Common Failure Modes
 

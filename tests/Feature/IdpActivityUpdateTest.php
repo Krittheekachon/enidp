@@ -16,7 +16,7 @@ class IdpActivityUpdateTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const DEV_NOTIFICATION_RECIPIENT = 'krittheekachon.s@kkumail.com';
+    private const DEV_NOTIFICATION_RECIPIENT = 'developer@example.test';
 
     public function test_employee_cannot_save_an_incomplete_progress_draft(): void
     {
@@ -70,7 +70,10 @@ class IdpActivityUpdateTest extends TestCase
             'periodEnd' => '2026-09-03',
             'progressNote' => 'ออกแบบ UI แล้ว',
             'evidenceLinks' => [['url' => 'https://example.test/design', 'description' => 'ต้นแบบ']],
-            'evidenceFiles' => [UploadedFile::fake()->image('screen.png')],
+            'evidenceFiles' => [UploadedFile::fake()->createWithContent(
+                'screen.png',
+                base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='),
+            )],
         ])->assertSessionHasNoErrors();
 
         $this->actingAs($employee)->post(route('employee.idp-activities.update-progress'), [

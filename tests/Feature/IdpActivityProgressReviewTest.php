@@ -17,7 +17,7 @@ class IdpActivityProgressReviewTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const DEV_NOTIFICATION_RECIPIENT = 'krittheekachon.s@kkumail.com';
+    private const DEV_NOTIFICATION_RECIPIENT = 'developer@example.test';
 
     protected function tearDown(): void
     {

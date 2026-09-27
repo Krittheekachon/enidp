@@ -3,7 +3,7 @@
 ## Implemented
 
 - Laravel/Inertia/Vue dashboard flow with role-specific shells.
-- Local mock SSO for development login.
+- Opt-in local mock SSO for development login (`MOCK_SSO_ENABLED=true`).
 - Admin user management with role, organization profile, reviewer chain, and IDP chain configuration.
 - Reviewer chain templates for both assessment and IDP workflows.
 - Runtime reviewer chains through `user_reviewer_steps`.
@@ -21,7 +21,6 @@
 
 ## Known Incomplete Areas
 
-- The documented business model allows multiple `idp_activities` per `idp_item`. The current employee form/controller has been described in repository documentation as still having one-activity-per-item shaped paths in places. Treat this as an implementation area that needs verification before extending.
 - Some historical `docs/superpowers` specifications and plans still describe old supervisor-column behavior. They are historical references, not the current runtime source of truth.
 - Some tests may still cover legacy compatibility behavior or older UI flows.
 
@@ -78,10 +77,11 @@ Business requirements say one IDP item can have many activities.
 
 Implementation currently does:
 
-- Tables support many `idp_activities` per `idp_item`.
-- Repository guidance says some current employee form/controller behavior may still be one-activity shaped.
+- Tables, `Employee\IdpController`, and the employee IDP UI support many `idp_activities` per `idp_item`.
+- Submission requires at least one activity and a total activity weight of 100 percent per competency item.
+- `EmployeeIdpPlanTest` verifies saving one competency plan with multiple activities.
 
-Status: partially implemented / needs verification before extending.
+Status: implemented and covered by feature tests.
 
 ## Known Failure Modes
 

@@ -15,7 +15,7 @@ class FcTopicSelectionFlowTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const DEV_NOTIFICATION_RECIPIENT = 'krittheekachon.s@kkumail.com';
+    private const DEV_NOTIFICATION_RECIPIENT = 'developer@example.test';
 
     public function test_employee_assigned_as_first_reviewer_sees_fc_topic_approval_module(): void
     {

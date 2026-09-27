@@ -145,6 +145,7 @@ The removed legacy table `idp_delivery_type_settings` should only appear in migr
 
 ## Integration Boundaries
 
-- Mock SSO exists only in the local environment through `/mock-sso`.
+- Mock SSO exists through `/mock-sso` only when the environment is `local` and `MOCK_SSO_ENABLED=true`.
+- Email notifications require `MAIL_NOTIFICATIONS_ENABLED=true`; delivery recipients remain controlled by the mail environment settings.
 - Email notifications are handled through mailables and `NotificationService`/`NotificationDigestService`.
 - File and URL evidence for IDP progress are stored through `idp_activity_updates`.

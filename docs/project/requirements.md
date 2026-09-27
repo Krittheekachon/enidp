@@ -167,9 +167,9 @@ Do not show every Learning Catalog entry across all competencies.
 - `IdpItemReviewWorkflow` reads `chain_type = idp` through `ReviewerChainResolver`.
 - `ReviewerChainTemplateController` supports create, update, delete, add users, and remove users for assessment and IDP templates.
 - The admin user management warning checks missing assessment and IDP chains rather than old supervisor columns.
+- The employee IDP controller and UI support multiple activities per competency item and enforce a total weight of 100 percent on submission.
 
 ## Unknown / Needs Verification
 
 - Whether every historical `docs/superpowers` plan has been fully implemented.
 - Whether all legacy statuses in old production data have been normalized.
-- Whether the employee IDP UI fully supports the documented many-activities-per-item business rule in every editing path.

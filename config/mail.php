@@ -115,11 +115,13 @@ return [
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
-    'send_to_real_users' => env('MAIL_SEND_TO_REAL_USERS', false),
+    'notifications_enabled' => (bool) env('MAIL_NOTIFICATIONS_ENABLED', false),
+
+    'send_to_real_users' => (bool) env('MAIL_SEND_TO_REAL_USERS', false),
 
     'dev_to' => array_values(array_filter(array_map(
         'trim',
-        explode(',', (string) env('MAIL_DEV_TO', 'krittheekachon.s@kkumail.com')),
+        explode(',', (string) env('MAIL_DEV_TO', '')),
     ))),
 
 ];

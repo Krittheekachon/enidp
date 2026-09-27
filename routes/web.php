@@ -36,7 +36,7 @@ Route::get('/dashboard', [DashboardController::class, 'index'])
     ->middleware(['auth', 'active', 'verified'])
     ->name('dashboard');
 
-if (app()->environment('local')) {
+if (app()->environment('local') && config('app.mock_sso_enabled')) {
     Route::get('/mock-sso', [MockSsoController::class, 'showLogin'])->name('mock.sso');
     Route::post('/mock-sso', [MockSsoController::class, 'login'])->name('mock.sso.login');
     Route::post('/mock-sso/test-notification', [MockSsoController::class, 'testNotification'])->name('mock.sso.test-notification');

@@ -8,8 +8,8 @@ use App\Mail\ReminderAssessMail;
 use App\Mail\RoleNotificationMail;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
@@ -31,7 +31,7 @@ class MockSsoController extends Controller
             ->values()
             ->map(fn (User $user) => [
                 'db_id' => $user->id,
-                'name' => ($user->title ?? '') . $user->name,
+                'name' => ($user->title ?? '').$user->name,
                 'role' => $this->roleKeyForUser($user),
                 'workline' => $user->workline ?? '',
                 'division' => $user->division ?? '',
@@ -74,7 +74,12 @@ class MockSsoController extends Controller
 
         $user = User::with('role')->findOrFail((int) $data['user_id']);
         $actionUrl = route('dashboard');
-        $recipient = $this->testRecipientForUser($user);
+        $recipient = $this->testRecipient();
+        if (! $recipient) {
+            throw ValidationException::withMessages([
+                'notification' => 'กรุณากำหนด MAIL_DEV_TO ก่อนทดสอบอีเมล',
+            ]);
+        }
         $groupName = $user->position ?: 'กลุ่มงานตัวอย่าง';
 
         $mailable = match ($data['type']) {
@@ -178,13 +183,11 @@ class MockSsoController extends Controller
         return $user->role?->role_key ?? $user->role?->key ?? 'employee';
     }
 
-    private function testRecipientForUser(User $user): string
+    private function testRecipient(): ?string
     {
-        return match ($this->roleKeyForUser($user)) {
-            'supervisor' => 'krittheekachon.s@kkumail.com',
-            'dept_head', 'division_head', 'academic_department_head', 'dean' => 'chin172755@gmail.com',
-            default => 'krittheekachon.s@kkumail.com',
-        };
+        $recipient = collect(config('mail.dev_to', []))->first();
+
+        return filled($recipient) ? (string) $recipient : null;
     }
 
     private function mockSsoUserPriority(User $user): int

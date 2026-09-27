@@ -405,7 +405,7 @@ php artisan serve --host=127.0.0.1 --port=8000
 npm run dev -- --host 127.0.0.1
 ```
 
-Open `/mock-sso` in the local environment, select the required role, navigate to the changed page, and verify:
+Set `MOCK_SSO_ENABLED=true`, open `/mock-sso` in the local environment, select the required role, navigate to the changed page, and verify:
 
 - visible ordering and layout;
 - initial/empty values;

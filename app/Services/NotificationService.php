@@ -25,14 +25,6 @@ use Throwable;
 
 class NotificationService
 {
-    private const DEFAULT_TEST_RECIPIENT = 'krittheekachon.s@kkumail.com';
-
-    private const REVIEWER_1_RECIPIENT = 'krittheekachon.s@kkumail.com';
-
-    private const REVIEWER_2_3_RECIPIENT = 'krittheekachon.s@kkumail.com';
-
-    private const EMPLOYEE_REVISION_RECIPIENT = 'krittheekachon.s@kkumail.com';
-
     public function __construct(
         private NotificationDigestService $digest,
         private ReviewerChainResolver $reviewerChainResolver,
@@ -46,7 +38,6 @@ class NotificationService
         $this->sendToUser(
             $reviewer,
             new AssessmentSubmittedMail($employee, $competencyName, $this->dashboardUrl()),
-            $this->recipientForReviewer($reviewer),
         );
     }
 
@@ -57,7 +48,6 @@ class NotificationService
         $this->sendToUser(
             $reviewer,
             new AssessmentSubmittedMail($employee, $competencyName, $this->dashboardUrl()),
-            $this->recipientForReviewer($reviewer),
         );
     }
 
@@ -216,7 +206,6 @@ class NotificationService
         $this->sendToUser(
             $employee,
             new AssessmentStatusUpdateMail($employee, $status, $this->dashboardUrl(), $rejectComment),
-            $this->recipientForEmployeeStatus($status),
         );
     }
 
@@ -232,7 +221,6 @@ class NotificationService
                 $context?->topic_names ?? [],
                 $this->dashboardUrl(),
             ),
-            $this->recipientForReviewer($reviewer),
         );
     }
 
@@ -249,7 +237,6 @@ class NotificationService
                 $this->dashboardUrl(),
                 $comment,
             ),
-            $this->recipientForEmployeeStatus($status),
         );
     }
 
@@ -267,7 +254,6 @@ class NotificationService
         $this->sendToUser(
             $reviewer,
             new IdpSubmittedMail($employee, $item->competency_name ?: 'แผน IDP', $this->dashboardUrl()),
-            $this->recipientForReviewer($reviewer),
         );
     }
 
@@ -294,7 +280,6 @@ class NotificationService
                 $item->competency_name ?: 'แผน IDP',
                 $this->dashboardUrl(),
             ),
-            $this->recipientForReviewer($reviewer),
         );
     }
 
@@ -310,7 +295,6 @@ class NotificationService
                 $comment,
                 $this->dashboardUrl(),
             ),
-            $this->recipientForEmployeeStatus('revision_required'),
         );
     }
 
@@ -331,7 +315,6 @@ class NotificationService
                 $comment,
                 $this->dashboardUrl(),
             ),
-            $this->recipientForEmployeeStatus('approved'),
         );
     }
 
@@ -348,12 +331,15 @@ class NotificationService
                 $this->dashboardUrl(),
                 $rejectComment,
             ),
-            $this->recipientForEmployeeStatus($status),
         );
     }
 
     public function isNotificationEnabled(): bool
     {
+        if (! config('mail.notifications_enabled', false)) {
+            return false;
+        }
+
         return ! app()->environment('local') || Cache::get('dev_notifications_enabled', true) !== false;
     }
 
@@ -454,7 +440,7 @@ class NotificationService
         });
     }
 
-    private function sendToUser(?User $user, $mailable, ?string $recipient = null): void
+    private function sendToUser(?User $user, $mailable): void
     {
         if (! $this->isNotificationEnabled()) {
             return;
@@ -496,32 +482,5 @@ class NotificationService
                 'message' => $exception->getMessage(),
             ]);
         }
-    }
-
-    private function recipientForReviewer(?User $reviewer): string
-    {
-        $roleKey = $this->normalizeRoleKey($reviewer?->role?->key ?? $reviewer?->role_key ?? '');
-
-        return match ($roleKey) {
-            'supervisor' => self::REVIEWER_1_RECIPIENT,
-            'dept_head', 'division_head', 'academic_department_head', 'dean' => self::REVIEWER_2_3_RECIPIENT,
-            default => self::DEFAULT_TEST_RECIPIENT,
-        };
-    }
-
-    private function recipientForEmployeeStatus(string $status): string
-    {
-        return $status === 'revision_required'
-            ? self::EMPLOYEE_REVISION_RECIPIENT
-            : self::DEFAULT_TEST_RECIPIENT;
-    }
-
-    private function normalizeRoleKey(string $roleKey): string
-    {
-        return match ($roleKey) {
-            'manager' => 'dean',
-            'manager_dept' => 'dept_head',
-            default => $roleKey,
-        };
     }
 }

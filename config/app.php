@@ -54,6 +54,8 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    'mock_sso_enabled' => (bool) env('MOCK_SSO_ENABLED', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

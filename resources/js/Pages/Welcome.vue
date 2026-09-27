@@ -1,7 +1,7 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 
-const loginWithKKU = () => {
+const loginWithPassword = () => {
     window.location.href = route('login');
 };
 </script>
@@ -52,12 +52,18 @@ const loginWithKKU = () => {
             <h1 id="welcome-title">ระบบบริหารสมรรถนะและแผนพัฒนารายบุคคล</h1>
             <p class="subtitle">Competency &amp; Individual Development Plan Management System</p>
 
-            <button class="login-button" type="button" @click="loginWithKKU">
-                <span class="login-icon" aria-hidden="true">
-                    <span></span>
-                </span>
-                <span>เข้าสู่ระบบด้วย KKU account</span>
-            </button>
+            <div class="login-actions">
+                <button class="login-button" type="button" disabled aria-disabled="true">
+                    <span class="login-icon" aria-hidden="true">
+                        <span></span>
+                    </span>
+                    <span>เข้าสู่ระบบด้วย KKU SSO</span>
+                </button>
+
+                <button class="alternative-login-button" type="button" @click="loginWithPassword">
+                    หรือ เข้าสู่ระบบด้วยวิธีอื่น
+                </button>
+            </div>
 
             <div class="support-row">
                 <span></span>
@@ -198,6 +204,10 @@ const loginWithKKU = () => {
     text-align: center;
 }
 
+.hero > * {
+    min-width: 0;
+}
+
 .hero-logo {
     display: grid;
     justify-items: center;
@@ -249,14 +259,20 @@ const loginWithKKU = () => {
     text-transform: uppercase;
 }
 
+.login-actions {
+    display: grid;
+    width: min(500px, calc(100vw - 44px));
+    gap: 12px;
+    margin-top: clamp(22px, 3.8vh, 34px);
+}
+
 .login-button {
     display: inline-flex;
-    width: min(500px, calc(100vw - 44px));
+    width: 100%;
     min-height: 58px;
     align-items: center;
     justify-content: center;
     gap: 20px;
-    margin-top: clamp(22px, 3.8vh, 34px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     background:
@@ -276,6 +292,17 @@ const loginWithKKU = () => {
     box-shadow: 0 22px 40px rgba(0, 0, 0, 0.4);
     filter: brightness(1.06);
     transform: translateY(-1px);
+}
+
+.login-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.76;
+}
+
+.login-button:disabled:hover {
+    box-shadow: 0 18px 34px rgba(0, 0, 0, 0.32);
+    filter: none;
+    transform: none;
 }
 
 .login-button:focus-visible {
@@ -300,6 +327,33 @@ const loginWithKKU = () => {
     display: block;
     background: #ffffff;
     content: '';
+}
+
+.alternative-login-button {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 6px;
+    background: rgba(15, 21, 23, 0.36);
+    color: #ffffff;
+    cursor: pointer;
+    font: inherit;
+    font-size: clamp(14px, 1vw, 17px);
+    font-weight: 600;
+    line-height: 1.3;
+    padding: 11px 20px;
+    transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.alternative-login-button:hover {
+    border-color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+}
+
+.alternative-login-button:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.7);
+    outline-offset: 4px;
 }
 
 .login-icon::before {
@@ -334,7 +388,7 @@ const loginWithKKU = () => {
     grid-template-columns: minmax(48px, 1fr) auto minmax(48px, 1fr);
     align-items: center;
     gap: 18px;
-    margin-top: 22px;
+    margin-top: 30px;
 }
 
 .support-row span {
@@ -371,6 +425,10 @@ const loginWithKKU = () => {
     .login-button {
         min-height: 54px;
         gap: 14px;
+    }
+
+    .login-actions {
+        gap: 10px;
     }
 
     .support-row {
@@ -435,17 +493,46 @@ const loginWithKKU = () => {
     }
 
     .hero h1 {
-        font-size: clamp(24px, 8vw, 32px);
+        max-width: 100%;
+        font-size: clamp(22px, 6.8vw, 28px);
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        word-break: break-all;
     }
 
     .subtitle {
+        max-width: 100%;
         font-size: 10px;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        word-break: break-word;
     }
 
     .login-button {
         min-height: 50px;
         gap: 12px;
         padding-inline: 16px;
+    }
+
+    .login-actions {
+        margin-top: 18px;
+    }
+
+    .alternative-login-button {
+        min-height: 44px;
+        padding: 9px 14px;
+    }
+
+    .support-row {
+        margin-top: 24px;
+    }
+
+    .support-row p {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        word-break: break-all;
     }
 
     .login-icon {

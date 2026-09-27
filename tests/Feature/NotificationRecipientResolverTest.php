@@ -15,13 +15,13 @@ class NotificationRecipientResolverTest extends TestCase
     {
         config([
             'mail.send_to_real_users' => false,
-            'mail.dev_to' => ['krittheekachon.s@kkumail.com'],
+            'mail.dev_to' => ['developer@example.test'],
         ]);
 
         $user = User::factory()->create(['email' => 'real-user@example.test']);
 
         $this->assertSame(
-            'krittheekachon.s@kkumail.com',
+            'developer@example.test',
             app(NotificationRecipientResolver::class)->recipientsFor($user),
         );
     }
