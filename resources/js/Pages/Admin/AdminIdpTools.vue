@@ -1252,10 +1252,10 @@ const deliveryTypeDisplay = (value) => {
 .preview-block header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: #f8fafc; }
 .preview-block h4 { margin: 0; color: var(--text); font-size: 13px; font-weight: 900; }
 .preview-block header span { color: var(--text3); font-size: 11px; font-weight: 900; }
-.preview-block header button { min-height: 34px; border: 1px solid #9ccfbe; border-radius: 7px; background: #eefaf6; color: #247260; font-size: 12px; font-weight: 900; padding: 6px 10px; }
+.preview-block header button { min-height: 34px; border: 1px solid var(--color-primary-border); border-radius: 7px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 12px; font-weight: 900; padding: 6px 10px; }
 .preview-approval-route { display: flex; align-items: center; gap: 10px; padding: 14px; }
 .preview-approval-step { display: flex; align-items: center; gap: 10px; min-width: 260px; border: 1px solid #cfe3dc; border-radius: 8px; background: #f8fcfa; padding: 10px 12px; }
-.preview-approval-step > span { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: #247260; color: #fff; font-size: 12px; font-weight: 900; }
+.preview-approval-step > span { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: var(--color-primary); color: #fff; font-size: 12px; font-weight: 900; }
 .preview-approval-step strong, .preview-approval-step small { display: block; }
 .preview-approval-step strong { color: var(--text); font-size: 12px; }
 .preview-approval-step small { margin-top: 3px; color: var(--text3); font-size: 10px; font-weight: 800; }
@@ -1309,7 +1309,7 @@ const deliveryTypeDisplay = (value) => {
 .preview-coaching-approaches > .preview-coaching-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .preview-coaching-heading > div { display: grid; gap: 2px; }
 .preview-coaching-heading small { color: var(--text3); font-size: 10px; }
-.preview-coaching-heading button { min-height: 28px; height: 28px; border: 1px solid #9ad4c4; border-radius: 999px; background: #fff; color: #247260; padding: 5px 11px; }
+.preview-coaching-heading button { min-height: 28px; height: 28px; border: 1px solid var(--color-primary-border); border-radius: 999px; background: #fff; color: var(--color-primary); padding: 5px 11px; }
 .preview-coaching-approaches .preview-coaching-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .preview-coaching-options button { display: flex; align-items: center; justify-content: flex-start; gap: 9px; min-height: 48px; border: 1px solid #cfd8e3; border-radius: 8px; background: #fff; color: var(--text2); padding: 9px 10px; font-weight: 900; opacity: 1; }
 .preview-coaching-options strong { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #edf1f5; color: #344054; }
@@ -1326,7 +1326,7 @@ const deliveryTypeDisplay = (value) => {
 .coaching-help-body { display: flex; flex-direction: column; gap: 16px; min-height: 0; overflow-x: hidden; overflow-y: scroll; overscroll-behavior: contain; background: #f4f7f9; padding: 18px; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
 .coaching-help-card { flex: 0 0 auto; overflow: hidden; border: 1px solid #d8e2e8; border-radius: 10px; background: #fff; }
 .coaching-help-card header { display: flex; align-items: flex-start; gap: 12px; border-bottom: 1px solid #e3e9ee; background: #f8fcfb; padding: 16px 18px; }
-.coaching-help-card header b { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 9px; background: #247260; color: #fff; font-size: 15px; }
+.coaching-help-card header b { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 9px; background: var(--color-primary); color: #fff; font-size: 15px; }
 .coaching-help-card header div { display: grid; gap: 3px; }
 .coaching-help-card header strong { color: var(--text); font-size: 16px; }
 .coaching-help-card header span { color: var(--text3); font-size: 12px; line-height: 1.45; }

@@ -46,6 +46,26 @@ class AuthenticationTest extends TestCase
         $response->assertRedirect(route('dashboard', absolute: false));
     }
 
+    public function test_login_post_replaces_an_existing_authenticated_session(): void
+    {
+        $admin = User::factory()->create([
+            'username' => 'admin',
+            'password' => 'admin-password',
+        ]);
+        $krit = User::factory()->create([
+            'username' => 'krit',
+            'password' => 'krit-password',
+        ]);
+
+        $response = $this->actingAs($admin)->post('/login', [
+            'email' => 'krit',
+            'password' => 'krit-password',
+        ]);
+
+        $this->assertAuthenticatedAs($krit);
+        $response->assertRedirect(route('dashboard', absolute: false));
+    }
+
     public function test_test_email_prefix_is_not_treated_as_a_username(): void
     {
         User::factory()->create([

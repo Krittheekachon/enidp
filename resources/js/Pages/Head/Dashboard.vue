@@ -3481,7 +3481,7 @@ const logout = () => router.post(route('logout'));
 .detail-indicator-list > div + div { margin-top: 7px; }
 .detail-indicator-list > div.selected { border-color: #f2b7a9; background: #fff8f5; color: #302b28; }
 .detail-indicator-list > div > span { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid #d6dbe0; border-radius: 5px; color: #fff; font-size: 11px; font-weight: 900; }
-.detail-indicator-list > div.selected > span { border-color: #c7432b; background: #c7432b; }
+.detail-indicator-list > div.selected > span { border-color: var(--color-primary); background: var(--color-primary); }
 .detail-indicator-list p { margin: 0; font-size: 12px; line-height: 1.6; }
 .detail-indicator-list p strong { display: inline-block; margin-right: 8px; color: inherit; }
 
@@ -3870,14 +3870,14 @@ const logout = () => router.post(route('logout'));
 }
 
 .approval-confirm-button {
-    border: 1px solid #0faaa7;
-    background: #0faaa7;
+    border: 1px solid var(--color-primary);
+    background: var(--color-primary);
     color: #fff;
 }
 
 .approval-confirm-button:hover:not(:disabled) {
-    border-color: #0f766e;
-    background: #0f766e;
+    border-color: var(--color-primary-hover);
+    background: var(--color-primary-hover);
     color: #fff;
 }
 
@@ -4550,7 +4550,7 @@ const logout = () => router.post(route('logout'));
 .supervisor-approval-card .approval-table td { padding: 16px; background: #fff; vertical-align: middle; border-top: 1px solid #e4e9ee; }
 .supervisor-approval-card .approval-table tbody tr:nth-child(even) td { background: #fafbfc; }
 .supervisor-approval-card .approval-table tbody tr:hover td { background: #f0f7f4; }
-.supervisor-approval-card .person-cell small { margin-top: 5px; color: #718096; font-size: 12px; }
+.supervisor-approval-card .person-cell small { margin-top: 5px; color: var(--color-text-muted); font-size: 12px; }
 .review-person-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; border: 0; padding: 0; background: transparent; color: #263d35; text-align: left; font: inherit; font-weight: 800; cursor: pointer; }
 .review-person-link:focus-visible { outline: 2px solid #39725d; outline-offset: 4px; }
 @media (max-width: 900px) { .supervisor-approval-card .approval-table { min-width: 700px; } }
@@ -4562,8 +4562,8 @@ const logout = () => router.post(route('logout'));
 .idp-mode-tabs button::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 3px; background: transparent; content: ''; }
 .idp-mode-tabs button:hover { background: #eef5f2; color: #2d5145; }
 .idp-mode-tabs button.active { background: #fff; color: #1f6956; }
-.idp-mode-tabs button.active::after { background: #247b66; }
-.idp-mode-tabs button:focus-visible { z-index: 1; outline: 3px solid rgba(36, 123, 102, .24); outline-offset: -3px; }
+.idp-mode-tabs button.active::after { background: var(--color-primary); }
+.idp-mode-tabs button:focus-visible { z-index: 1; outline: 3px solid var(--color-focus); outline-offset: -3px; }
 .idp-tab-copy { display: grid; gap: 3px; }
 .idp-tab-copy strong { font-size: 16px; line-height: 1.35; }
 .idp-tab-copy small { color: #7a8782; font-size: 12px; font-weight: 600; line-height: 1.45; }

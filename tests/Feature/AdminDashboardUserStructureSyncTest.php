@@ -392,6 +392,173 @@ class AdminDashboardUserStructureSyncTest extends TestCase
             );
     }
 
+    public function test_dashboard_preserves_support_path_for_global_support_position(): void
+    {
+        $admin = User::factory()->create([
+            'name' => 'Admin User',
+            'role_id' => $this->roleId('admin'),
+        ]);
+        $worklineId = DB::table('worklines')->insertGetId([
+            'name' => 'สายสนับสนุน',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $jobFamilyId = DB::table('job_families')->insertGetId([
+            'workline_id' => $worklineId,
+            'name' => 'ตำแหน่งสายสนับสนุน',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $departmentId = DB::table('support_departments')->insertGetId([
+            'name' => 'ฝ่ายแผนยุทธศาสตร์และพัฒนาองค์กร',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $workId = DB::table('support_works')->insertGetId([
+            'support_department_id' => $departmentId,
+            'name' => 'งานแผนยุทธศาสตร์และทรัพยากรบุคคล',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('support_units')->insert([
+            'support_work_id' => $workId,
+            'name' => 'หน่วยแผนยุทธศาสตร์',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $positionId = DB::table('positions')->insertGetId([
+            'job_family_id' => $jobFamilyId,
+            'support_unit_id' => null,
+            'name' => 'นักทรัพยากรบุคคล',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $levelId = DB::table('levels')->insertGetId([
+            'workline_id' => $worklineId,
+            'job_family_id' => null,
+            'name' => 'ระดับชำนาญงาน / ชำนาญการ',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $reviewer = User::factory()->create([
+            'name' => 'Support Reviewer',
+            'role_id' => $this->roleId('supervisor'),
+        ]);
+        $user = User::factory()->create([
+            'name' => 'ZZ Global Support User',
+            'role_id' => $this->roleId('hr'),
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายแผนยุทธศาสตร์และพัฒนาองค์กร > งานแผนยุทธศาสตร์และทรัพยากรบุคคล > หน่วยแผนยุทธศาสตร์',
+            'position' => 'นักทรัพยากรบุคคล',
+            'level' => 'ระดับชำนาญงาน / ชำนาญการ',
+            'position_id' => $positionId,
+            'level_id' => $levelId,
+        ]);
+        $this->assignReviewer($user, $reviewer);
+
+        $this->actingAs($admin)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/Dashboard')
+                ->where('users', function ($users): bool {
+                    $user = collect($users)->firstWhere('n', 'ZZ Global Support User');
+
+                    return $user
+                        && $user['d'] === 'ฝ่ายแผนยุทธศาสตร์และพัฒนาองค์กร > งานแผนยุทธศาสตร์และทรัพยากรบุคคล > หน่วยแผนยุทธศาสตร์'
+                        && $user['structureStatus'] === 'ok';
+                })
+            );
+    }
+
+    public function test_dashboard_accepts_support_heads_without_unit_when_path_is_valid(): void
+    {
+        $admin = User::factory()->create([
+            'name' => 'Admin User',
+            'role_id' => $this->roleId('admin'),
+        ]);
+        $worklineId = DB::table('worklines')->insertGetId([
+            'name' => 'สายสนับสนุน',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $jobFamilyId = DB::table('job_families')->insertGetId([
+            'workline_id' => $worklineId,
+            'name' => 'ตำแหน่งสายสนับสนุน',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $departmentId = DB::table('support_departments')->insertGetId([
+            'name' => 'ฝ่ายแผนยุทธศาสตร์และพัฒนาองค์กร',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('support_works')->insert([
+            'support_department_id' => $departmentId,
+            'name' => 'งานแผนยุทธศาสตร์และทรัพยากรบุคคล',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $positionId = DB::table('positions')->insertGetId([
+            'job_family_id' => $jobFamilyId,
+            'support_unit_id' => null,
+            'name' => 'นักทรัพยากรบุคคล',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $levelId = DB::table('levels')->insertGetId([
+            'workline_id' => $worklineId,
+            'job_family_id' => null,
+            'name' => 'ระดับชำนาญงานพิเศษ / ชำนาญการพิเศษ',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $reviewer = User::factory()->create([
+            'name' => 'Support Reviewer',
+            'role_id' => $this->roleId('supervisor'),
+        ]);
+        $divisionHead = User::factory()->create([
+            'name' => 'ZZ Division Head Without Unit',
+            'role_id' => $this->roleId('division_head'),
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายแผนยุทธศาสตร์และพัฒนาองค์กร > งานแผนยุทธศาสตร์และทรัพยากรบุคคล',
+            'position' => 'นักทรัพยากรบุคคล',
+            'level' => 'ระดับชำนาญงานพิเศษ / ชำนาญการพิเศษ',
+            'position_id' => $positionId,
+            'level_id' => $levelId,
+        ]);
+        $deptHead = User::factory()->create([
+            'name' => 'ZZ Dept Head Without Unit',
+            'role_id' => $this->roleId('dept_head'),
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายแผนยุทธศาสตร์และพัฒนาองค์กร > งานแผนยุทธศาสตร์และทรัพยากรบุคคล',
+            'position' => 'นักทรัพยากรบุคคล',
+            'level' => 'ระดับชำนาญงานพิเศษ / ชำนาญการพิเศษ',
+            'position_id' => $positionId,
+            'level_id' => $levelId,
+        ]);
+        $this->assignReviewer($divisionHead, $reviewer);
+        $this->assignReviewer($deptHead, $reviewer);
+
+        $this->actingAs($admin)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/Dashboard')
+                ->where('users', function ($users): bool {
+                    $users = collect($users);
+                    $divisionHead = $users->firstWhere('n', 'ZZ Division Head Without Unit');
+                    $deptHead = $users->firstWhere('n', 'ZZ Dept Head Without Unit');
+
+                    return $divisionHead
+                        && $deptHead
+                        && $divisionHead['structureStatus'] === 'ok'
+                        && $deptHead['structureStatus'] === 'ok';
+                })
+            );
+    }
+
     private function createValidStructure(): void
     {
         $worklineId = DB::table('worklines')->insertGetId([

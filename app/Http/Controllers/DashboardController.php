@@ -553,6 +553,10 @@ class DashboardController extends Controller
             }
         }
 
+        if ($this->hasStoredSupportHierarchy($user)) {
+            return $user->department ?: '';
+        }
+
         $currentJobFamily = $this->currentJobFamilyNameForUser($user);
 
         if (! $currentJobFamily) {
@@ -623,6 +627,11 @@ class DashboardController extends Controller
     private function structureIssuesForUser(User $user, string $department): array
     {
         $issues = [];
+        $roleKey = $this->roleKeyForUser($user);
+
+        if ($roleKey === 'dean') {
+            return $issues;
+        }
 
         if (! $user->workline) {
             $issues[] = 'ยังไม่ได้กำหนดสายงาน';
@@ -637,7 +646,7 @@ class DashboardController extends Controller
             return $issues;
         }
 
-        if ($this->usesSupportUnitStructure($user) || $this->isSupportDepartmentPath($user, $department)) {
+        if ($this->usesSupportUnitStructure($user) || $this->isSupportDepartmentPath($user, $department) || $this->hasStoredSupportHierarchy($user)) {
             return $this->supportStructureIssuesForUser($user, (int) $worklineId, $department);
         }
 
@@ -660,7 +669,6 @@ class DashboardController extends Controller
                     ->where('name', $user->position)
                     ->exists()
                 : false;
-            $roleKey = $this->roleKeyForUser($user);
             $usesJobFamilyAsPosition = $roleKey === 'dean'
                 && $jobFamilyName !== ''
                 && $user->position === $jobFamilyName;
@@ -692,7 +700,19 @@ class DashboardController extends Controller
     private function supportStructureIssuesForUser(User $user, int $worklineId, string $department): array
     {
         $issues = [];
+        $roleKey = $this->roleKeyForUser($user);
         $path = array_values(array_filter(array_map('trim', explode(' > ', $department))));
+        $pathCount = count($path);
+        $departmentExists = $pathCount >= 1
+            ? DB::table('support_departments')->where('name', $path[0])->exists()
+            : false;
+        $workExists = $pathCount >= 2
+            ? DB::table('support_works')
+                ->join('support_departments', 'support_works.support_department_id', '=', 'support_departments.id')
+                ->where('support_departments.name', $path[0])
+                ->where('support_works.name', $path[1])
+                ->exists()
+            : false;
         $supportUnitId = count($path) === 3
             ? DB::table('support_units')
                 ->join('support_works', 'support_units.support_work_id', '=', 'support_works.id')
@@ -702,15 +722,31 @@ class DashboardController extends Controller
                 ->where('support_units.name', $path[2])
                 ->value('support_units.id')
             : null;
+        $hasValidSupportPath = match ($roleKey) {
+            'division_head' => $pathCount === 1
+                ? $departmentExists
+                : ($pathCount === 2 ? $departmentExists && $workExists : (bool) $supportUnitId),
+            'dept_head' => $pathCount === 2
+                ? $departmentExists && $workExists
+                : (bool) $supportUnitId,
+            default => (bool) $supportUnitId,
+        };
 
-        if (! $supportUnitId) {
+        if (! $hasValidSupportPath) {
             $issues[] = 'ฝ่าย งาน หรือหน่วยนี้ไม่มีในโครงสร้างสายสนับสนุนปัจจุบัน';
         }
 
         if (! $user->position) {
             $issues[] = 'ยังไม่ได้กำหนดตำแหน่ง';
         } else {
-            $positionExists = $supportUnitId
+            $globalPositionExists = DB::table('positions')
+                ->join('job_families', 'positions.job_family_id', '=', 'job_families.id')
+                ->where('job_families.workline_id', $worklineId)
+                ->whereNull('positions.support_unit_id')
+                ->where('positions.name', $user->position)
+                ->when($user->position_id, fn ($query) => $query->where('positions.id', $user->position_id))
+                ->exists();
+            $unitPositionExists = $supportUnitId
                 ? DB::table('positions')
                     ->where('support_unit_id', $supportUnitId)
                     ->where('name', $user->position)
@@ -718,7 +754,7 @@ class DashboardController extends Controller
                     ->exists()
                 : false;
 
-            if (! $positionExists) {
+            if (! $globalPositionExists && ! $unitPositionExists) {
                 $issues[] = 'ตำแหน่งนี้ไม่มีในหน่วยงานสายสนับสนุนปัจจุบัน';
             }
         }
@@ -755,6 +791,20 @@ class DashboardController extends Controller
             ->where('id', $user->position_id)
             ->whereNotNull('support_unit_id')
             ->exists();
+    }
+
+    private function hasStoredSupportHierarchy(User $user): bool
+    {
+        if (! in_array($user->workline, ['สายสนับสนุน', 'สายงานสนับสนุน'], true) || blank($user->department)) {
+            return false;
+        }
+
+        $parts = array_values(array_filter(array_map('trim', explode(' > ', $user->department))));
+        if ($parts === []) {
+            return false;
+        }
+
+        return DB::table('support_departments')->where('name', $parts[0])->exists();
     }
 
     private function isSupportDepartmentPath(User $user, string $department): bool
@@ -809,6 +859,13 @@ class DashboardController extends Controller
             ->get()
             ->groupBy('job_family_id');
 
+        $globalPositionsByFamily = DB::table('positions')
+            ->whereNull('support_unit_id')
+            ->select('id', 'job_family_id', 'name')
+            ->orderBy('name')
+            ->get()
+            ->groupBy('job_family_id');
+
         $supportDepartments = DB::table('support_departments')
             ->select('id', 'name')
             ->orderBy('name')
@@ -826,11 +883,18 @@ class DashboardController extends Controller
             ->get()
             ->groupBy('support_work_id');
 
+        $globalPositionKeys = DB::table('positions')
+            ->whereNull('support_unit_id')
+            ->select('job_family_id', 'name')
+            ->get()
+            ->mapWithKeys(fn (object $position) => [$position->job_family_id.'|||'.$position->name => true]);
+
         $positionsBySupportUnit = DB::table('positions')
             ->whereNotNull('support_unit_id')
-            ->select('support_unit_id', 'name')
+            ->select('support_unit_id', 'job_family_id', 'name')
             ->orderBy('name')
             ->get()
+            ->reject(fn (object $position) => $globalPositionKeys->has($position->job_family_id.'|||'.$position->name))
             ->groupBy('support_unit_id');
 
         $supportUnitContextById = $supportDepartments
@@ -864,7 +928,7 @@ class DashboardController extends Controller
             'id' => $family->id,
             'name' => $family->name,
             'worklineName' => $family->workline_name,
-            'positions' => ($positionsByFamily[$family->id] ?? collect())
+            'positions' => ($globalPositionsByFamily[$family->id] ?? collect())
                 ->pluck('name')
                 ->values(),
         ]);
@@ -1561,7 +1625,11 @@ class DashboardController extends Controller
             ->leftJoin('competency_types', 'competencies.competency_type_id', '=', 'competency_types.id')
             ->where('assessments.user_id', $user->id)
             ->when($roundId, fn ($query) => $query->where('assessments.assessment_round_id', $roundId))
-            ->whereNotNull('assessments.last_draft_saved_at')
+            ->where(function ($query) {
+                $query->whereNotNull('assessments.last_draft_saved_at')
+                    ->orWhere('assessments.status', '<>', 'draft')
+                    ->orWhereNotNull('competency_gaps.id');
+            })
             ->select(
                 'assessments.id as assessment_id',
                 'competency_gaps.id as competency_gap_id',

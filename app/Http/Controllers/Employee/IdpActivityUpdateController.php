@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Employee;
 
 use App\Http\Controllers\Controller;
 use App\Services\IdpItemReviewWorkflow;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,7 @@ class IdpActivityUpdateController extends Controller
 {
     public function __construct(
         private readonly IdpItemReviewWorkflow $reviewWorkflow,
+        private readonly NotificationService $notifications,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -147,6 +149,7 @@ class IdpActivityUpdateController extends Controller
                     'status' => 'in_progress',
                     'updated_at' => $now,
                 ]);
+
             });
         } catch (\Throwable $exception) {
             foreach ($storedPaths as $path) {
@@ -165,7 +168,8 @@ class IdpActivityUpdateController extends Controller
         $data = $request->validate(['idpItemId' => ['required', 'integer']]);
         $roundId = DB::table('assessment_rounds')->where('is_active', true)->orderByDesc('id')->value('id');
 
-        DB::transaction(function () use ($request, $data, $roundId): void {
+        $submittedItemId = null;
+        DB::transaction(function () use ($request, $data, $roundId, &$submittedItemId): void {
             $item = DB::table('idp_items')
                 ->join('idps', 'idp_items.idp_id', '=', 'idps.id')
                 ->leftJoin('competency_gaps', 'idp_items.competency_gap_id', '=', 'competency_gaps.id')
@@ -224,7 +228,13 @@ class IdpActivityUpdateController extends Controller
                     'created_at' => $now,
                 ]);
             }
+
+            $submittedItemId = (int) $item->id;
         });
+
+        if ($submittedItemId) {
+            $this->notifications->notifyIdpReviewerOfProgressSubmission($request->user(), $submittedItemId);
+        }
 
         return back()->with('success', 'ส่งผลการพัฒนาสมรรถนะให้หัวหน้าตรวจแล้ว');
     }

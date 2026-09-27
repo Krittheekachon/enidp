@@ -76,6 +76,13 @@ class UserController extends Controller
             ]);
         }
 
+        $roleKey = $this->normalizeRoleKey((string) DB::table('roles')->where('id', $user->role_id)->value('key'));
+        if ($roleKey === 'admin' && $data['act'] === false) {
+            throw ValidationException::withMessages([
+                'act' => 'ไม่สามารถระงับบัญชีผู้ดูแลระบบได้',
+            ]);
+        }
+
         $user->update([
             'is_active' => $data['act'],
         ]);
@@ -126,10 +133,10 @@ class UserController extends Controller
                 Password::min(8),
             ],
             'ph' => ['nullable', 'regex:/^0\d{2}-\d{3}-\d{4}$/'],
-            'w' => ['required', 'string', 'max:120'],
-            'd' => ['required', 'string', 'max:255'],
-            'p' => [Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:120'],
-            'l' => ['required', 'string', 'max:120'],
+            'w' => [Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:120'],
+            'd' => [Rule::requiredIf(fn () => $request->input('r') !== 'dean'), 'nullable', 'string', 'max:255'],
+            'p' => [Rule::requiredIf(fn () => ! $this->allowsMissingPositionFields($request)), 'nullable', 'string', 'max:120'],
+            'l' => [Rule::requiredIf(fn () => ! $this->allowsMissingPositionFields($request)), 'nullable', 'string', 'max:120'],
             'r' => ['required', Rule::in($roleKeys)],
             'reviewer_ids' => ['nullable', 'array'],
             'reviewer_ids.*' => ['nullable', 'integer', 'exists:users,id'],
@@ -148,8 +155,34 @@ class UserController extends Controller
         $data = $this->validatedStructureData($data);
         $data['reviewer_ids'] = $this->normalizeReviewerIds($data, $user, 'reviewer_ids', 'reviewer_template_id', 'assessment');
         $data['idp_reviewer_ids'] = $this->normalizeReviewerIds($data, $user, 'idp_reviewer_ids', 'idp_reviewer_template_id', 'idp');
+        if ($data['idp_reviewer_ids'] === [] && blank($data['idp_reviewer_template_id'] ?? null)) {
+            $data['idp_reviewer_ids'] = $data['reviewer_ids'];
+        }
 
         return $data;
+    }
+
+    private function allowsMissingPositionFields(Request $request): bool
+    {
+        $roleKey = $this->normalizeRoleKey((string) $request->input('r', ''));
+        if ($roleKey === 'dean') {
+            return true;
+        }
+
+        if (! in_array($roleKey, ['division_head', 'dept_head'], true)) {
+            return false;
+        }
+
+        $workline = (string) $request->input('w', '');
+        if (! in_array($workline, ['สายสนับสนุน', 'สายงานสนับสนุน'], true)) {
+            return false;
+        }
+
+        $pathCount = count(array_filter(array_map('trim', explode(' > ', (string) $request->input('d', '')))));
+
+        return $roleKey === 'division_head'
+            ? $pathCount >= 1 && $pathCount < 3
+            : $pathCount === 2;
     }
 
     private function assertReviewerTemplateIsValid(mixed $templateId, string $chainType, string $field): void
@@ -203,7 +236,7 @@ class UserController extends Controller
             'last_name_en' => $data['le'] ?? null,
             'email' => $data['em'],
             'phone' => $data['ph'] ?? null,
-            'workline' => $data['w'],
+            'workline' => $data['w'] ?? null,
             'department' => $data['d'] ?? null,
             'position' => $data['p'] ?? null,
             'level' => $data['l'] ?? null,
@@ -227,6 +260,23 @@ class UserController extends Controller
 
     private function validatedStructureData(array $data): array
     {
+        $roleKey = $this->normalizeRoleKey($data['r']);
+
+        if ($roleKey === 'dean' && (
+            ! filled($data['w'] ?? null)
+            || ! filled($data['d'] ?? null)
+            || ! filled($data['l'] ?? null)
+        )) {
+            $data['w'] = null;
+            $data['d'] = null;
+            $data['p'] = null;
+            $data['l'] = null;
+            $data['_position_id'] = null;
+            $data['_level_id'] = null;
+
+            return $data;
+        }
+
         $worklineId = DB::table('worklines')->where('name', $data['w'])->value('id');
 
         if (! $worklineId) {
@@ -235,10 +285,14 @@ class UserController extends Controller
             ]);
         }
 
-        if (
-            in_array($data['w'], ['สายสนับสนุน', 'สายงานสนับสนุน'], true)
-            && count(array_filter(array_map('trim', explode(' > ', $data['d'])))) === 3
-        ) {
+        $departmentPath = array_values(array_filter(array_map('trim', explode(' > ', $data['d']))));
+        $usesSupportHierarchy = in_array($data['w'], ['สายสนับสนุน', 'สายงานสนับสนุน'], true)
+            && (
+                count($departmentPath) === 3
+                || DB::table('support_departments')->where('name', $departmentPath[0] ?? '')->exists()
+            );
+
+        if ($usesSupportHierarchy) {
             return $this->validatedSupportStructureData($data, (int) $worklineId);
         }
 
@@ -260,10 +314,7 @@ class UserController extends Controller
             $data['p'] = $jobFamilyName;
         }
 
-        $positionId = DB::table('positions')
-            ->where('job_family_id', $jobFamily->id)
-            ->where('name', $data['p'] ?? '')
-            ->value('id');
+        $positionId = $this->positionIdForJobFamily((int) $jobFamily->id, (string) ($data['p'] ?? ''));
         $usesJobFamilyAsPosition = $this->normalizeRoleKey($data['r']) === 'dean'
             && trim((string) ($data['p'] ?? '')) === $jobFamilyName;
 
@@ -293,9 +344,68 @@ class UserController extends Controller
 
     private function validatedSupportStructureData(array $data, int $worklineId): array
     {
+        $roleKey = $this->normalizeRoleKey($data['r']);
         $path = array_values(array_filter(array_map('trim', explode(' > ', $data['d']))));
-        if (count($path) !== 3) {
+        $pathCount = count($path);
+        if ($pathCount < 1 || $pathCount > 3) {
             throw ValidationException::withMessages(['d' => 'กรุณาเลือกฝ่าย งาน และหน่วยให้ครบถ้วน']);
+        }
+
+        if ($pathCount < 3) {
+            if ($pathCount === 1 && $roleKey !== 'division_head') {
+                throw ValidationException::withMessages(['d' => 'กรุณาเลือกฝ่าย งาน และหน่วยให้ครบถ้วน']);
+            }
+
+            if ($pathCount === 2 && ! in_array($roleKey, ['division_head', 'dept_head'], true)) {
+                throw ValidationException::withMessages(['d' => 'กรุณาเลือกฝ่าย งาน และหน่วยให้ครบถ้วน']);
+            }
+
+            $departmentExists = DB::table('support_departments')
+                ->where('name', $path[0])
+                ->exists();
+            if (! $departmentExists) {
+                throw ValidationException::withMessages(['d' => 'กรุณาเลือกฝ่ายที่กำหนดไว้ในระบบ']);
+            }
+
+            if ($pathCount === 2) {
+                $workExists = DB::table('support_works')
+                    ->join('support_departments', 'support_works.support_department_id', '=', 'support_departments.id')
+                    ->where('support_departments.name', $path[0])
+                    ->where('support_works.name', $path[1])
+                    ->exists();
+
+                if (! $workExists) {
+                    throw ValidationException::withMessages(['d' => 'กรุณาเลือกงานที่กำหนดไว้ในฝ่ายนี้']);
+                }
+            }
+
+            if (filled($data['p'] ?? null) || filled($data['l'] ?? null)) {
+                if (filled($data['p'] ?? null)) {
+                    if ($pathCount < 2) {
+                        throw ValidationException::withMessages(['p' => 'กรุณาเลือกงานก่อนเลือกตำแหน่ง']);
+                    }
+
+                    $positionId = $this->positionIdForSupportWork($worklineId, $path[0], $path[1], (string) $data['p']);
+                    if (! $positionId) {
+                        throw ValidationException::withMessages(['p' => 'กรุณาเลือกตำแหน่งที่กำหนดไว้ในงานนี้']);
+                    }
+                    $data['_position_id'] = $positionId;
+                } else {
+                    $data['p'] = null;
+                    $data['_position_id'] = null;
+                }
+
+                $data['_level_id'] = $this->levelIdForWorkline($worklineId, (string) ($data['l'] ?? ''));
+
+                return $data;
+            }
+
+            $data['p'] = null;
+            $data['l'] = null;
+            $data['_position_id'] = null;
+            $data['_level_id'] = null;
+
+            return $data;
         }
 
         [$divisionName, $workName, $unitName] = $path;
@@ -311,27 +421,77 @@ class UserController extends Controller
             throw ValidationException::withMessages(['d' => 'กรุณาเลือกหน่วยที่กำหนดไว้ในฝ่ายและงานนี้']);
         }
 
-        $positionId = DB::table('positions')
-            ->where('support_unit_id', $unitId)
-            ->where('name', $data['p'] ?? '')
-            ->value('id');
-        if (! $positionId) {
-            throw ValidationException::withMessages(['p' => 'กรุณาเลือกตำแหน่งที่กำหนดไว้ในหน่วยนี้']);
-        }
-
-        $levelId = DB::table('levels')
-            ->where('workline_id', $worklineId)
-            ->whereNull('job_family_id')
-            ->where('name', $data['l'])
-            ->value('id');
-        if (! $levelId) {
-            throw ValidationException::withMessages(['l' => 'กรุณาเลือกระดับตำแหน่งที่กำหนดไว้ในสายงานสนับสนุน']);
-        }
+        [$positionId, $levelId] = $this->validatePositionAndLevelForSupportWork($data, $worklineId, $divisionName, $workName);
 
         $data['_position_id'] = $positionId;
         $data['_level_id'] = $levelId;
 
         return $data;
+    }
+
+    private function validatePositionAndLevelForSupportWork(array $data, int $worklineId, string $divisionName, string $workName): array
+    {
+        $positionId = $this->positionIdForSupportWork($worklineId, $divisionName, $workName, (string) ($data['p'] ?? ''));
+        if (! $positionId) {
+            throw ValidationException::withMessages(['p' => 'กรุณาเลือกตำแหน่งที่กำหนดไว้ในงานนี้']);
+        }
+
+        $levelId = $this->levelIdForWorkline($worklineId, (string) ($data['l'] ?? ''));
+
+        return [(int) $positionId, (int) $levelId];
+    }
+
+    private function levelIdForWorkline(int $worklineId, string $levelName): int
+    {
+        $levelId = DB::table('levels')
+            ->where('workline_id', $worklineId)
+            ->whereNull('job_family_id')
+            ->where('name', $levelName)
+            ->value('id');
+
+        if (! $levelId) {
+            throw ValidationException::withMessages(['l' => 'กรุณาเลือกระดับตำแหน่งที่กำหนดไว้ในสายงานนี้']);
+        }
+
+        return (int) $levelId;
+    }
+
+    private function positionIdForJobFamily(int $jobFamilyId, string $positionName): ?int
+    {
+        $positionId = DB::table('positions')
+            ->where('job_family_id', $jobFamilyId)
+            ->where('name', $positionName)
+            ->orderBy('id')
+            ->value('id');
+
+        return $positionId ? (int) $positionId : null;
+    }
+
+    private function positionIdForSupportWork(int $worklineId, string $divisionName, string $workName, string $positionName): ?int
+    {
+        $globalPositionId = DB::table('positions')
+            ->join('job_families', 'positions.job_family_id', '=', 'job_families.id')
+            ->where('job_families.workline_id', $worklineId)
+            ->whereNull('positions.support_unit_id')
+            ->where('positions.name', $positionName)
+            ->orderBy('positions.id')
+            ->value('positions.id');
+
+        if ($globalPositionId) {
+            return (int) $globalPositionId;
+        }
+
+        $positionId = DB::table('positions')
+            ->join('support_units', 'positions.support_unit_id', '=', 'support_units.id')
+            ->join('support_works', 'support_units.support_work_id', '=', 'support_works.id')
+            ->join('support_departments', 'support_works.support_department_id', '=', 'support_departments.id')
+            ->where('support_departments.name', $divisionName)
+            ->where('support_works.name', $workName)
+            ->where('positions.name', $positionName)
+            ->orderBy('positions.id')
+            ->value('positions.id');
+
+        return $positionId ? (int) $positionId : null;
     }
 
     private function normalizeReviewerIds(array $data, ?User $user, string $idsKey, string $templateKey, string $chainType): array

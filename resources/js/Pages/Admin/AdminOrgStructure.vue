@@ -1,4 +1,4 @@
-<script lang="tsx">
+﻿<script lang="tsx">
 import { defineComponent, ref, watchEffect, type PropType } from "vue";
 import { router } from "@inertiajs/vue3";
 const useState = (initial: any) => {
@@ -287,6 +287,14 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
       }
       return groups;
     };
+    const supportGlobalPositionGroupName = () => {
+      const groups = groupMapForWorkline(supportWorklineName());
+      return Object.keys(groups)[0] || "ตำแหน่งสายสนับสนุน";
+    };
+    const supportGlobalPositions = () => {
+      const groups = groupMapForWorkline(supportWorklineName());
+      return Array.from(new Set(Object.values(groups).flat().filter(Boolean)));
+    };
     const setGroupMapForWorkline = (worklineName: string, groups: Record<string, string[]>) => {
       applyJobFamiliesByWorkline({
         ...jobFamiliesByWorkline,
@@ -353,7 +361,7 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
 
     const saveEdit = () => {
       if (!newValue.value.trim()) return;
-      const { type, oldName, parent, workName, worklineName } = editingItem.value;
+      const { type, oldName, parent, workName, worklineName, unitName } = editingItem.value;
       switch (type) {
         case "academic-dept":
           putStructure("admin.structure.job-families.update", { workline_name: "สายวิชาการ", old_name: oldName, name: newValue.value }, () => {
@@ -419,6 +427,35 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
             if (parent && nextSupportOrg[parent]) {
               putStructure("admin.structure.support-works.update", { division_name: parent, old_name: oldName, name: newValue.value }, () => {
                 nextSupportOrg[parent] = nextSupportOrg[parent].map((w: any) => w.work === oldName ? { ...w, work: newValue.value } : w);
+                setSupportOrg(nextSupportOrg);
+                setEditingId(null);
+              });
+              return;
+            }
+            break;
+          }
+        case "support-unit-position":{
+            const nextSupportOrg = { ...supportOrg };
+            if (parent && workName && unitName && nextSupportOrg[parent]) {
+              putStructure("admin.structure.positions.update", {
+                division_name: parent,
+                work_name: workName,
+                unit_name: unitName,
+                old_name: oldName,
+                name: newValue.value
+              }, () => {
+                nextSupportOrg[parent] = nextSupportOrg[parent].map((work: any) => work.work !== workName ? work : {
+                  ...work,
+                  units: (work.units || []).map((unit: any) => {
+                    const currentUnitName = typeof unit === "string" ? unit : unit.name;
+                    if (currentUnitName !== unitName || typeof unit === "string") return unit;
+
+                    return {
+                      ...unit,
+                      positions: (unit.positions || []).map((position: string) => position === oldName ? newValue.value : position)
+                    };
+                  })
+                });
                 setSupportOrg(nextSupportOrg);
                 setEditingId(null);
               });
@@ -527,7 +564,7 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
     };
 
     const deleteItem = () => {
-      const { type, oldName, parent, workName, worklineName } = editingItem.value;
+      const { type, oldName, parent, workName, worklineName, unitName } = editingItem.value;
 
       switch (type) {
         case "academic-dept":
@@ -592,6 +629,14 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
                 setSupportOrg(nextSupportOrg);
                 setEditingId(null);
               });
+              return;
+            }
+            break;
+          }
+        case "support-unit-position":{
+            if (parent && workName && unitName) {
+              deleteSupportUnitPosition(parent, workName, unitName, oldName);
+              setEditingId(null);
               return;
             }
             break;
@@ -674,6 +719,44 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
       setEditingId(null);
     };
 
+    const deleteSupportGlobalPosition = (positionName: string) => {
+      const targetWorklineName = supportWorklineName();
+      const groupName = supportGlobalPositionGroupName();
+      deleteStructure("admin.structure.positions.destroy", { workline_name: targetWorklineName, job_family_name: groupName, name: positionName }, () => {
+        const groups = groupMapForWorkline(targetWorklineName);
+        setGroupMapForWorkline(targetWorklineName, {
+          ...groups,
+          [groupName]: (groups[groupName] || []).filter((position) => position !== positionName)
+        });
+      });
+    };
+
+    const deleteSupportUnitPosition = (divisionName: string, workName: string, unitName: string, positionName: string) => {
+      deleteStructure("admin.structure.positions.destroy", {
+        division_name: divisionName,
+        work_name: workName,
+        unit_name: unitName,
+        name: positionName
+      }, () => {
+        supportOrg = {
+          ...supportOrg,
+          [divisionName]: (supportOrg[divisionName] || []).map((work: any) => work.work !== workName ? work : {
+            ...work,
+            units: (work.units || []).map((unit: any) => {
+              const currentUnitName = typeof unit === "string" ? unit : unit.name;
+              if (currentUnitName !== unitName || typeof unit === "string") return unit;
+
+              return {
+                ...unit,
+                positions: (unit.positions || []).filter((position: string) => position !== positionName)
+              };
+            })
+          })
+        };
+        setSupportOrg(supportOrg);
+      });
+    };
+
     const openAddItem = () => {
       const nextItem = activeTab.value === "comp" ?
       { category: "comp", type: "1", name: "", fullName: "", desc: "", parent: "", grandparent: "" } :
@@ -693,6 +776,7 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
       if (addItemData.value.category === "workline") return { title: "เพิ่มสายงาน", label: "ชื่อสายงาน" };
       if (addItemData.value.category === "support-dept") return { title: "เพิ่มฝ่าย", label: "ชื่อฝ่าย" };
       if (addItemData.value.category === "support-unit-position") return { title: `เพิ่มตำแหน่งในหน่วย ${addItemData.value.parent}`, label: "ชื่อตำแหน่ง" };
+      if (addItemData.value.category === "support-global-position") return { title: "เพิ่มตำแหน่ง Global ในสายสนับสนุน", label: "ชื่อตำแหน่ง" };
       if (addItemData.value.category === "comp") return { title: "เพิ่มประเภทสมรรถนะ", label: "รหัสประเภทสมรรถนะ" };
       if (addItemData.value.category === "dept") {
         return normalizeWorklineName(addItemData.value.worklineName || typeLabel) === "วิชาการ" ?
@@ -723,6 +807,25 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
       const trimmedName = name.trim();
       if (trimmedName) {
         if (category === "pos" && type === "2" && !parent) return;
+        if (category === "support-global-position") {
+          const targetWorklineName = supportWorklineName();
+          const groupName = supportGlobalPositionGroupName();
+          if (supportGlobalPositions().includes(trimmedName)) {
+            alert(`มีตำแหน่ง "${trimmedName}" ในสายสนับสนุนแล้ว`);
+            return;
+          }
+          setIsSavingAddItem(true);
+          postStructure("admin.structure.positions.store", { workline_name: targetWorklineName, job_family_name: groupName, name: trimmedName }, () => {
+            const groups = groupMapForWorkline(targetWorklineName);
+            setGroupMapForWorkline(targetWorklineName, {
+              ...groups,
+              [groupName]: [...(groups[groupName] || []), trimmedName]
+            });
+            setIsSavingAddItem(false);
+            clearAddNameAndFocus();
+          });
+          return;
+        }
         if (category === "support-unit-position") {
           const divisionName = addItemData.value.grandparent;
           const [workName, unitName] = String(addItemData.value.parent || "").split("||| ");
@@ -913,7 +1016,27 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
                             {isSupport && <button class="btn btn-s btn-sm" onClick={() => {setAddItemData({ category: "support-dept", type: "2", name: "", worklineName: wl, parent: "", grandparent: "" });setShowAddModal(true);}}>+ เพิ่มฝ่าย</button>}
                         </div>
                       </div>
-	                      {isSupport ? <div class="support-columns">
+	                      {isSupport ? <>
+                        <div class="support-global-position-panel">
+                          <div class="support-global-position-head">
+                            <div>
+                              <div class="fw7 fs13">ตำแหน่งของสายงาน</div>
+                              <div class="fs11 muted">ใช้ร่วมกันได้ทุกฝ่าย งาน และหน่วยในสายสนับสนุน</div>
+                            </div>
+                            <button class="compact-add" onClick={() => {setAddItemData({ category: "support-global-position", type: "2", name: "", worklineName: wl, parent: supportGlobalPositionGroupName(), grandparent: "" });setShowAddModal(true);}}>+ ตำแหน่ง Global</button>
+                          </div>
+                          <div class="support-global-position-list">
+                            {supportGlobalPositions().map((position) =>
+                              <span key={position} class="support-position-chip editable-chip">
+                                <span>{position}</span>
+                                <button class="btn-link" onClick={() => startEdit("support-group-pos", position, { parent: supportGlobalPositionGroupName(), workName: wl })} title="แก้ไขตำแหน่ง">✎</button>
+                                <button class="chip-remove" onClick={(event: any) => {event.stopPropagation(); deleteSupportGlobalPosition(position);}} title="ลบตำแหน่ง" aria-label={`ลบตำแหน่ง ${position}`}>×</button>
+                              </span>
+                            )}
+                            {supportGlobalPositions().length === 0 && <div class="structure-empty compact">ยังไม่มีตำแหน่ง Global ในสายงานนี้</div>}
+                          </div>
+                        </div>
+                        <div class="support-columns">
 	                          {Object.entries(supportOrg).map(([division, works]: any) => <div key={division} class="support-column">
 	                            <div class="support-column-head"><div class="structure-name"><span class="structure-type-tag">ฝ่าย</span><strong>{division}</strong></div><div class="structure-row-actions"><button class="compact-add" onClick={() => setActiveInlineAdd(`work:${division}`)}>+ งาน</button><button class="btn-link" onClick={() => startEdit("support-dept", division)} title="แก้ไขฝ่าย">✎</button></div></div>
 	                            {activeInlineAdd.value === `work:${division}` && <div class="inline-add-composer"><input class="inp" value={newSupportWorkNames.value[division] || ""} onInput={(event: any) => setNewSupportWorkNames((current) => ({ ...current, [division]: event.target.value }))} placeholder="ชื่องาน" autofocus/><button class="btn btn-p btn-sm" onClick={() => addSupportWork(division)}>เพิ่ม</button><button class="btn btn-s btn-sm" onClick={() => setActiveInlineAdd("")}>ยกเลิก</button></div>}
@@ -924,7 +1047,7 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
                                   const unit = typeof rawUnit === "string" ? { name: rawUnit, positions: [] } : rawUnit;
                                   return <div key={unit.name} class="support-unit-block">
 	                                    <div class="support-unit-row"><div class="structure-name"><span class="structure-type-tag quiet">หน่วย</span><span>{unit.name}</span></div><div class="structure-row-actions"><button class="compact-add subtle" onClick={() => {setAddItemData({ category: "support-unit-position", type: "2", name: "", worklineName: wl, parent: `${work.work}||| ${unit.name}`, grandparent: division });setShowAddModal(true);}}>+ ตำแหน่ง</button><button class="btn-link" onClick={() => startEdit("support-unit", unit.name, { parent: division, workName: work.work })} title="แก้ไขหน่วย">✎</button></div></div>
-	                                    {(unit.positions || []).length > 0 && <div class="support-position-inline">{(unit.positions || []).map((position: string) => <span key={position} class="support-position-chip">{position}</span>)}</div>}
+	                                    {(unit.positions || []).length > 0 && <div class="support-position-inline">{(unit.positions || []).map((position: string) => <span key={position} class="support-position-chip editable-chip"><span>{position}</span><button class="btn-link" onClick={() => startEdit("support-unit-position", position, { parent: division, workName: work.work, unitName: unit.name })} title="แก้ไขตำแหน่ง">✎</button><button class="chip-remove" onClick={(event: any) => {event.stopPropagation(); deleteSupportUnitPosition(division, work.work, unit.name, position);}} title="ลบตำแหน่ง" aria-label={`ลบตำแหน่ง ${position}`}>×</button></span>)}</div>}
 	                                  </div>;
                                 })}
 	                              </div>
@@ -932,7 +1055,7 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
 	                            </div>)}
 	                          </div>)}
                           {!Object.keys(supportOrg).length && <div class="structure-empty">ยังไม่มีฝ่ายในสายสนับสนุน</div>}
-                        </div> : <div class="academic-department-list">
+                        </div></> : <div class="academic-department-list">
                         {groupNames.map((department) => {
                           const positions = groupMap[department] || [];
                           return <div key={department} class="academic-department-card">
@@ -1409,7 +1532,15 @@ const AdminOrgStructure = defineComponent({ name: "AdminOrgStructure", props: ["
         .inline-add-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 10px; border: 1px solid #dbe5f1; border-radius: 8px; background: #f8fafc; }
         .support-unit-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 46px; padding: 7px 4px 7px 18px; color: var(--text); font-size: 13px; font-weight: 650; }
         .support-position-inline { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px 10px 70px; }
-        .support-position-chip { padding: 5px 9px; border: 1px solid #e2e7ed; border-radius: 6px; background: #f7f9fb; color: #5a6675; font-size: 11px; font-weight: 650; }
+        .support-position-chip { position: relative; padding: 5px 9px; border: 1px solid #e2e7ed; border-radius: 6px; background: #f7f9fb; color: #5a6675; font-size: 11px; font-weight: 650; }
+        .support-position-chip.removable-chip { display: inline-flex; align-items: center; gap: 6px; padding-right: 24px; }
+        .support-global-position-panel { display: grid; gap: 10px; margin-bottom: 14px; padding: 12px; border: 1px solid #dbe5f1; border-radius: 8px; background: #fbfdff; }
+        .support-global-position-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .support-global-position-list { display: flex; flex-wrap: wrap; gap: 7px; }
+        .support-position-chip.editable-chip { display: inline-flex; align-items: center; gap: 6px; padding-right: 24px; background: #fff; }
+        .support-position-chip.editable-chip .btn-link { font-size: 12px; line-height: 1; }
+        .chip-remove { position: absolute; top: -7px; right: -7px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid #fecaca; border-radius: 999px; background: #fff; color: #dc2626; cursor: pointer; font-size: 13px; font-weight: 900; line-height: 1; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+        .chip-remove:hover { background: #fee2e2; border-color: #fca5a5; }
         .support-head-select { display: grid; gap: 5px; }
         .support-add-card { min-height: 150px; border-style: dashed; background: #fbfdff; }
         .structure-empty { grid-column: 1 / -1; padding: 14px; border: 1px dashed var(--border); border-radius: 7px; color: var(--text3); font-size: 13px; text-align: center; }

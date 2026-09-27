@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Employee;
 
 use App\Http\Controllers\Controller;
 use App\Services\AssessmentRoundWindow;
+use App\Services\NotificationService;
 use App\Services\ReviewerChainResolver;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,6 +16,7 @@ class FcTopicSelectionController extends Controller
     public function __construct(
         private ReviewerChainResolver $reviewerChainResolver,
         private AssessmentRoundWindow $assessmentRoundWindow,
+        private NotificationService $notifications,
     )
     {
     }
@@ -72,9 +74,9 @@ class FcTopicSelectionController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($user, $positionId, $roundId, $selectedIds, $firstReviewerId): void {
+        $selectionId = DB::transaction(function () use ($user, $positionId, $roundId, $selectedIds, $firstReviewerId): int {
             $now = now();
-            $selectionId = DB::table('fc_topic_selections')->updateOrInsert(
+            DB::table('fc_topic_selections')->updateOrInsert(
                 [
                     'user_id' => $user->id,
                     'position_id' => $positionId,
@@ -108,7 +110,11 @@ class FcTopicSelectionController extends Controller
                 'created_at' => $now,
                 'updated_at' => $now,
             ])->all());
+
+            return (int) $selectionId;
         });
+
+        $this->notifications->notifyFcTopicSelectionSubmitted($user, $selectionId);
 
         return back()->with('success', 'ส่งหัวข้อ FC ให้หัวหน้า 1 อนุมัติแล้ว');
     }
@@ -141,6 +147,6 @@ class FcTopicSelectionController extends Controller
 
     private function activeRoundId(): int
     {
-        return (int) $this->assessmentRoundWindow->assertSelfAssessmentOpen()->id;
+        return (int) $this->assessmentRoundWindow->activeRound()->id;
     }
 }

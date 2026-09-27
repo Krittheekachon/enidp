@@ -305,9 +305,9 @@ class DemoIdpGapSeeder extends Seeder
     private function ensureLearningMethods($now): void
     {
         foreach ([
-            ['key' => 'experiential', 'label' => 'Experiential Learning', 'description' => 'เรียนรู้จากการลงมือทำและรับผิดชอบงานจริง', 'sort_order' => 1],
-            ['key' => 'social', 'label' => 'Social Learning', 'description' => 'เรียนรู้ผ่าน coaching, mentoring และแลกเปลี่ยนกับผู้อื่น', 'sort_order' => 2],
-            ['key' => 'formal', 'label' => 'Formal Learning', 'description' => 'เรียนรู้ผ่านหลักสูตร อบรม หรือ e-Learning', 'sort_order' => 3],
+            ['key' => 'experiential-learning', 'label' => 'Experiential Learning', 'description' => 'เรียนรู้จากการลงมือทำและรับผิดชอบงานจริง', 'sort_order' => 1],
+            ['key' => 'social-learning', 'label' => 'Social Learning', 'description' => 'เรียนรู้ผ่าน coaching, mentoring และแลกเปลี่ยนกับผู้อื่น', 'sort_order' => 2],
+            ['key' => 'formal-learning', 'label' => 'Formal Learning', 'description' => 'เรียนรู้ผ่านหลักสูตร อบรม หรือ e-Learning', 'sort_order' => 3],
         ] as $method) {
             DB::table('learning_method_types')->updateOrInsert(['key' => $method['key']], [
                 ...$method,

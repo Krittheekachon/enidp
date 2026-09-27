@@ -500,7 +500,7 @@ export default defineComponent({
 
 .empty-option {
     padding: 14px;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 13px;
     text-align: center;
 }
@@ -561,7 +561,7 @@ export default defineComponent({
 }
 
 .template-title {
-    color: #475569;
+    color: var(--color-text-secondary);
     font-size: 16px;
 }
 
@@ -577,10 +577,10 @@ export default defineComponent({
     min-height: 54px;
     justify-content: center;
     padding: 10px 18px;
-    border: 1.5px solid #2563eb;
+    border: 1.5px solid var(--color-primary);
     border-radius: 12px;
     background: #fff;
-    color: #2563eb;
+    color: var(--color-primary);
     font-weight: 800;
 }
 
@@ -590,14 +590,14 @@ export default defineComponent({
 
 .template-support {
     padding-right: 4px;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 12px;
     font-weight: 700;
 }
 
 .import-file-label {
     margin: 0 0 16px;
-    color: #334155;
+    color: var(--color-text-secondary);
     font-size: 14px;
 }
 
@@ -617,7 +617,7 @@ export default defineComponent({
 
 .upload-title {
     min-width: 0;
-    color: #0b2a55;
+    color: var(--color-text);
     font-size: 18px;
     font-weight: 900;
     line-height: 1.35;
@@ -628,7 +628,7 @@ export default defineComponent({
 .upload-desc {
     grid-column: 2;
     min-width: 0;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 13px;
     font-weight: 700;
     line-height: 1.6;
@@ -676,9 +676,9 @@ export default defineComponent({
 }
 
 .upload-dropzone.is-dragging {
-    border-color: #2563eb;
-    background: #eff6ff;
-    box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.16);
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft);
+    box-shadow: inset 0 0 0 2px rgba(117, 41, 45, 0.16);
 }
 
 .upload-dropzone.has-error {
@@ -709,15 +709,15 @@ export default defineComponent({
 }
 
 .import-submit-button {
-    border: 1px solid #2563eb;
-    background: #2563eb;
+    border: 1px solid var(--color-primary);
+    background: var(--color-primary);
     color: #fff;
-    box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+    box-shadow: 0 10px 22px rgba(117, 41, 45, 0.18);
 }
 
 .import-submit-button:hover:not(:disabled) {
-    border-color: #1d4ed8;
-    background: #1d4ed8;
+    border-color: var(--color-primary-hover);
+    background: var(--color-primary-hover);
     transform: translateY(-1px);
 }
 

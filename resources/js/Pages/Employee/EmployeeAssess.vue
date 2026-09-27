@@ -21,6 +21,7 @@ const availableFcCompetencies = computed(() => fcTopicSelection.value.availableC
 const selectedFcIds = ref<number[]>([]);
 const selectedFcDetail = ref<any | null>(null);
 const isSubmittingFcSelection = ref(false);
+const fcSelectionSubmitError = ref('');
 const blockReasons = computed(() => props.blockReasons || []);
 const reviewerSteps = computed(() => {
   if (Array.isArray(props.user?.reviewerSteps) && props.user.reviewerSteps.length) return props.user.reviewerSteps;
@@ -89,15 +90,27 @@ const fcSelectionStatusLabel = computed(() => {
 });
 
 const selectedFcCount = computed(() => selectedFcIds.value.length);
+const isFcSelectionEditable = computed(() => ['draft', 'revision_required'].includes(fcSelectionStatus.value));
 const canSubmitFcSelection = computed(() =>
   fcSelectionRequired.value
   && !isSubmittingFcSelection.value
-  && ['draft', 'revision_required'].includes(fcSelectionStatus.value)
+  && isFcSelectionEditable.value
   && selectedFcCount.value === requiredFcCount.value,
 );
+const canClickSubmitFcSelection = computed(() =>
+  fcSelectionRequired.value
+  && !isSubmittingFcSelection.value
+  && isFcSelectionEditable.value,
+);
+const fcSelectionSubmitHint = computed(() => {
+  if (!fcSelectionRequired.value) return '';
+  if (!isFcSelectionEditable.value) return 'รายการนี้ถูกส่งหรืออนุมัติแล้ว ไม่สามารถส่งซ้ำได้';
+  if (selectedFcCount.value === requiredFcCount.value) return '';
+  return `กรุณาเลือกหัวข้อ FC ให้ครบ ${requiredFcCount.value} ข้อก่อนส่งให้หัวหน้า`;
+});
 
 const toggleFcSelection = (id: number) => {
-  if (!['draft', 'revision_required'].includes(fcSelectionStatus.value)) return;
+  if (!isFcSelectionEditable.value) return;
 
   const current = new Set(selectedFcIds.value);
   if (current.has(id)) {
@@ -108,6 +121,7 @@ const toggleFcSelection = (id: number) => {
   }
 
   selectedFcIds.value = [...current];
+  fcSelectionSubmitError.value = '';
 };
 
 const openFcDetail = (item: any) => {
@@ -119,13 +133,20 @@ const closeFcDetail = () => {
 };
 
 const submitFcSelection = () => {
-  if (!canSubmitFcSelection.value) return;
+  if (!canSubmitFcSelection.value) {
+    fcSelectionSubmitError.value = fcSelectionSubmitHint.value;
+    return;
+  }
 
   isSubmittingFcSelection.value = true;
+  fcSelectionSubmitError.value = '';
   router.post(route('employee.fc-topic-selection.submit'), {
     competency_ids: selectedFcIds.value,
   }, {
     preserveScroll: true,
+    onError: (errors) => {
+      fcSelectionSubmitError.value = String(errors.competency_ids || errors.supervisor || errors.position || errors.assessment || 'ส่งหัวข้อ FC ไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง');
+    },
     onFinish: () => {
       isSubmittingFcSelection.value = false;
     },
@@ -149,6 +170,10 @@ const reviewProgressLabel = (status: string) => {
   return `รอการอนุมัติผลการประเมินจากหัวหน้าลำดับที่ ${step}${total > 0 ? ` จาก ${total}` : ''}`;
 };
 const competencyStatus = (item: any) => competencyStatuses.value[String(item?.id || '')] || item?.assessmentStatus || 'draft';
+const isAssessmentFullyApproved = computed(() =>
+  assignedCompetencies.value.length > 0
+  && assignedCompetencies.value.every((item: any) => isFinalApprovedStatus(competencyStatus(item))),
+);
 const submittedAssessmentCount = computed(() =>
   assignedCompetencies.value.reduce((total: number, item: any) => {
     const status = competencyStatus(item);
@@ -410,25 +435,38 @@ onBeforeUnmount(() => {
       </span>
     </div>
 
-    <div v-if="fcSelectionRequired && isBaseAssessmentReady" class="assessment-process">
-      <div class="process-intro">
-        <strong>ขั้นตอนก่อนเริ่มทำแบบประเมิน</strong>
-        <span>ขณะนี้คุณอยู่ที่ขั้นตอน {{ isFcSelectionApproved ? '3' : (fcSelectionStatus === 'submitted' ? '2' : '1') }} จาก 3</span>
+    <div
+      v-if="fcSelectionRequired && isBaseAssessmentReady"
+      class="assessment-process"
+      :class="{ complete: isAssessmentFullyApproved }"
+    >
+      <div class="process-content" :aria-hidden="isAssessmentFullyApproved">
+        <div class="process-intro">
+          <strong>ขั้นตอนก่อนเริ่มทำแบบประเมิน</strong>
+          <span>ขณะนี้คุณอยู่ที่ขั้นตอน {{ isFcSelectionApproved ? '3' : (fcSelectionStatus === 'submitted' ? '2' : '1') }} จาก 3</span>
+        </div>
+        <ol class="process-steps">
+          <li :class="{ active: ['draft', 'revision_required'].includes(fcSelectionStatus), done: ['submitted', 'approved'].includes(fcSelectionStatus) }">
+            <span>1</span>
+            <div><strong>เลือกหัวข้อ FC</strong><small>เลือก {{ requiredFcCount }} ข้อที่เหมาะสมกับงานของตน</small></div>
+          </li>
+          <li :class="{ active: fcSelectionStatus === 'submitted', done: fcSelectionStatus === 'approved' }">
+            <span>2</span>
+            <div><strong>รออนุมัติหัวข้อการประเมิน</strong><small>หัวหน้าตรวจหัวข้อที่เลือก</small></div>
+          </li>
+          <li :class="{ active: isFcSelectionApproved }">
+            <span>3</span>
+            <div><strong>ทำแบบประเมิน</strong><small>ประเมินสมรรถนะทีละหัวข้อ</small></div>
+          </li>
+        </ol>
       </div>
-      <ol class="process-steps">
-        <li :class="{ active: ['draft', 'revision_required'].includes(fcSelectionStatus), done: ['submitted', 'approved'].includes(fcSelectionStatus) }">
-          <span>1</span>
-          <div><strong>เลือกหัวข้อ FC</strong><small>เลือก {{ requiredFcCount }} ข้อที่เหมาะสมกับงานของตน</small></div>
-        </li>
-        <li :class="{ active: fcSelectionStatus === 'submitted', done: fcSelectionStatus === 'approved' }">
-          <span>2</span>
-          <div><strong>รอนอนุมัติหัวข้อการประเมิน</strong><small>หัวหน้าตรวจหัวข้อที่เลือก</small></div>
-        </li>
-        <li :class="{ active: isFcSelectionApproved }">
-          <span>3</span>
-          <div><strong>ทำแบบประเมิน</strong><small>ประเมินสมรรถนะทีละหัวข้อ</small></div>
-        </li>
-      </ol>
+      <div v-if="isAssessmentFullyApproved" class="process-complete" role="status">
+        <span class="process-complete-icon" aria-hidden="true">✓</span>
+        <div>
+          <strong>อนุมัติผลการประเมินแล้ว</strong>
+          <small>เริ่มทำแผน IDP ได้</small>
+        </div>
+      </div>
     </div>
 
     <section v-if="hasAssessmentReviewer && isBaseAssessmentReady" class="review-route">
@@ -539,25 +577,26 @@ onBeforeUnmount(() => {
           v-for="item in availableFcCompetencies"
           :key="item.id"
           class="fc-choice"
-          :class="{ selected: selectedFcIds.includes(Number(item.id)), locked: !['draft', 'revision_required'].includes(fcSelectionStatus) }"
+          :class="{ selected: selectedFcIds.includes(Number(item.id)), locked: !isFcSelectionEditable }"
           role="button"
           tabindex="0"
-          @click="openFcDetail(item)"
-          @keydown.enter="openFcDetail(item)"
-          @keydown.space.prevent="openFcDetail(item)"
+          @click="toggleFcSelection(Number(item.id))"
+          @keydown.enter.prevent="toggleFcSelection(Number(item.id))"
+          @keydown.space.prevent="toggleFcSelection(Number(item.id))"
         >
           <div class="fc-choice-main">
             <span class="fc-choice-copy">
               <span class="fc-code">{{ item.cd }}</span>
               <strong>{{ item.n }}</strong>
-              <span class="fc-detail-link">อ่านรายละเอียด</span>
+              <button class="fc-detail-link" type="button" @click.stop="openFcDetail(item)" @keydown.stop>อ่านรายละเอียด</button>
             </span>
           </div>
           <button
             class="fc-choice-state"
             type="button"
-            :disabled="!['draft', 'revision_required'].includes(fcSelectionStatus)"
+            :disabled="!isFcSelectionEditable"
             @click.stop="toggleFcSelection(Number(item.id))"
+            @keydown.stop
           >
             <span class="fc-check" aria-hidden="true">{{ selectedFcIds.includes(Number(item.id)) ? '✓' : '' }}</span>
             {{ selectedFcIds.includes(Number(item.id)) ? 'เลือกแล้ว' : 'เลือก' }}
@@ -574,11 +613,13 @@ onBeforeUnmount(() => {
         <div>
           <strong>{{ fcSelectionStatus === 'submitted' ? 'กำลังรอการอนุมัติ' : 'เมื่อส่งแล้วจะเปลี่ยนหัวข้อไม่ได้' }}</strong>
           <span>{{ fcSelectionStatus === 'submitted' ? 'กลับมาที่หน้านี้เพื่อตรวจสอบสถานะได้' : 'ตรวจสอบหัวข้อที่เลือกก่อนส่งให้หัวหน้า' }}</span>
+          <span v-if="fcSelectionSubmitError" class="fc-submit-warning">{{ fcSelectionSubmitError }}</span>
         </div>
         <button
           class="btn btn-p"
           type="button"
-          :disabled="!canSubmitFcSelection"
+          :disabled="!canClickSubmitFcSelection"
+          :aria-disabled="!canSubmitFcSelection"
           @click="submitFcSelection"
         >
           {{ isSubmittingFcSelection ? 'กำลังส่ง...' : (fcSelectionStatus === 'submitted' ? 'ส่งหัวข้อแล้ว' : (fcSelectionStatus === 'approved' ? 'อนุมัติแล้ว' : 'ส่งหัวข้อให้หัวหน้า')) }}
@@ -624,7 +665,7 @@ onBeforeUnmount(() => {
             <button
               class="btn btn-p"
               type="button"
-              :disabled="!['draft', 'revision_required'].includes(fcSelectionStatus)"
+              :disabled="!isFcSelectionEditable"
               @click="toggleFcSelection(Number(selectedFcDetail.id))"
             >
               {{ selectedFcIds.includes(Number(selectedFcDetail.id)) ? 'ยกเลิกการเลือก' : 'เลือกหัวข้อนี้' }}
@@ -858,12 +899,47 @@ onBeforeUnmount(() => {
 .readiness-footer strong { color: var(--text); font-size: 11px; font-weight: 900; }
 .readiness-footer span { color: var(--text3); font-size: 10px; line-height: 1.5; }
 .assessment-process {
+  position: relative;
   overflow: hidden;
   border: 1px solid #d9dee5;
   border-radius: 12px;
   background: #fbfcfd;
   box-shadow: 0 8px 24px rgba(21, 25, 29, .05);
 }
+.process-content { transition: filter .2s ease, opacity .2s ease; }
+.assessment-process.complete .process-content {
+  filter: blur(3px);
+  opacity: .34;
+  pointer-events: none;
+  user-select: none;
+}
+.process-complete {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  background: rgba(248, 252, 250, .7);
+  padding: 16px;
+  text-align: left;
+}
+.process-complete-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #2f735f;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 900;
+}
+.process-complete > div { display: grid; gap: 3px; }
+.process-complete strong { color: #194f40; font-size: 16px; font-weight: 900; }
+.process-complete small { color: #496c61; font-size: 11px; font-weight: 800; }
 .process-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; border-bottom: 1px solid #e2e6eb; }
 .process-intro strong { color: var(--text); font-size: 13px; font-weight: 900; }
 .process-intro span { color: var(--text3); font-size: 11px; font-weight: 800; }
@@ -1041,10 +1117,17 @@ onBeforeUnmount(() => {
 }
 .fc-detail-link {
   grid-column: 1 / -1;
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  padding: 0;
   color: #a63824;
   font-size: 10px;
   font-weight: 900;
+  cursor: pointer;
 }
+.fc-detail-link:hover { text-decoration: underline; }
+.fc-detail-link:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .fc-choice-state { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; border: 0; border-radius: 999px; background: #eef1f4; color: #687381; padding: 7px 10px; font-size: 10px; font-weight: 900; cursor: pointer; }
 .fc-choice.selected .fc-choice-state { background: #f7ded7; color: #a63824; }
 .fc-choice-state:disabled { cursor: default; opacity: .72; }
@@ -1085,6 +1168,7 @@ onBeforeUnmount(() => {
 .fc-selection-actions > div { display: grid; gap: 3px; }
 .fc-selection-actions strong { color: var(--text); font-size: 11px; font-weight: 900; }
 .fc-selection-actions span { color: var(--text3); font-size: 10px; }
+.fc-selection-actions .fc-submit-warning { color: #b42318; font-weight: 800; }
 .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .summary-card {
   border: 1px solid var(--border);
@@ -1388,8 +1472,8 @@ onBeforeUnmount(() => {
 }
 
 .emp-level-status.done {
-  background: #ccfbf1;
-  color: #0f766e;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 .emp-indicator-list { display: block; width: 100%; background: #fff; }
 .emp-indicator-row {
@@ -1407,7 +1491,7 @@ onBeforeUnmount(() => {
 .emp-indicator-row:last-child { border-bottom: 0; }
 .emp-indicator-row:has(input:disabled) {
   background: #fafbfc;
-  color: #9aa6b2;
+  color: var(--color-disabled-text);
   cursor: not-allowed;
 }
 .emp-indicator-row input {
@@ -1423,7 +1507,7 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 .emp-indicator-row input:disabled {
-  opacity: .45;
+  opacity: 1;
   cursor: not-allowed;
 }
 .emp-indicator-copy {
@@ -1444,11 +1528,11 @@ onBeforeUnmount(() => {
   text-overflow: initial;
   word-break: break-word;
 }
-.emp-indicator-row:has(input:disabled) small { color: #94a3b8; }
+.emp-indicator-row:has(input:disabled) small { color: var(--color-disabled-text); }
 .emp-indicator-row em {
   display: block;
   margin-top: 6px;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   font-size: 11px;
   font-style: normal;
   font-weight: 700;
@@ -1479,12 +1563,12 @@ onBeforeUnmount(() => {
   outline: none;
 }
 .emp-note-section textarea:focus {
-  border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(15, 170, 167, .12);
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 2px var(--color-focus);
 }
 .emp-note-section textarea:disabled {
-  background: #f8fafc;
-  color: #94a3b8;
+  background: var(--color-disabled-bg);
+  color: var(--color-disabled-text);
   cursor: not-allowed;
 }
 .reviewer-comment-section {
@@ -1560,9 +1644,9 @@ onBeforeUnmount(() => {
   gap: 8px;
   min-width: 132px;
   border-radius: 10px;
-  background: var(--teal, #0faaa7);
+  background: var(--teal, #75292d);
   color: #fff;
-  border-color: var(--teal, #0faaa7);
+  border-color: var(--teal, #75292d);
   opacity: 1;
   visibility: visible;
 }
@@ -1636,17 +1720,17 @@ onBeforeUnmount(() => {
     color: var(--text);
 }
 .confirm-actions .btn-t {
-  border: 1px solid var(--teal, #0faaa7);
-  background: var(--teal, #0faaa7);
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
   color: #fff;
 }
 .confirm-actions .btn-t:hover:not(:disabled) {
-  border-color: #0f766e;
-  background: #0f766e;
+  border-color: var(--color-primary-hover);
+  background: var(--color-primary-hover);
   color: #fff;
 }
 .confirm-actions .btn:disabled {
-  opacity: .55;
+  opacity: 1;
   cursor: not-allowed;
 }
 @media (max-width: 760px) {

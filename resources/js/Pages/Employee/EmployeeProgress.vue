@@ -431,7 +431,7 @@ const formatDate = (value?: string) => {
 
 <style scoped>
 .employee-page {
-  --progress-green: #247260;
+  --progress-green: var(--color-success, #166534);
   --progress-green-dark: #185c4b;
   --progress-line: #d9e3df;
   display: grid;

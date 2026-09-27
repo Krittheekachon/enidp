@@ -355,7 +355,7 @@ const topicTimelineEntries = (activity: any, topicIndex: number, completion: any
 </template>
 
 <style scoped>
-.detail-page { --green: #247b66; --green-deep: #195e4d; --ink: #24352f; --muted: #718079; --line: #d5e1dc; display: grid; gap: 16px; color: var(--ink); }
+.detail-page { --green: var(--color-primary); --green-deep: var(--color-primary-hover); --ink: var(--color-text); --muted: var(--color-text-muted); --line: var(--color-border); display: grid; gap: 16px; color: var(--ink); }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .page-head h1 { margin: 0; font-size: 22px; font-weight: 900; }
 .page-head p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
@@ -365,7 +365,7 @@ const topicTimelineEntries = (activity: any, topicIndex: number, completion: any
 .competency-picker { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 1px 1px 7px; }
 .competency-picker button { display: grid; grid-template-columns: auto minmax(220px, 1fr); align-items: center; gap: 11px; flex: 0 0 min(390px, 84vw); border: 1px solid var(--line); border-radius: 9px; background: #fafcfb; padding: 10px 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .competency-picker button:hover { border-color: #95bbae; background: #f4f9f7; }
-.competency-picker button:focus-visible, .activity-nav button:focus-visible, .topic-picker button:focus-visible { outline: 3px solid rgba(36, 123, 102, .2); outline-offset: 2px; }
+.competency-picker button:focus-visible, .activity-nav button:focus-visible, .topic-picker button:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
 .competency-picker button.active { border-color: var(--green); background: #eaf4f0; box-shadow: inset 0 -2px 0 var(--green); }
 .competency-picker button > span { border-radius: 7px; background: #e7f0ed; padding: 9px 10px; color: var(--green-deep); font-size: 13px; font-weight: 900; }
 .competency-picker button.active > span { background: var(--green); color: #f8fcfa; }
@@ -431,7 +431,7 @@ const topicTimelineEntries = (activity: any, topicIndex: number, completion: any
 .timeline-update-row > article > header strong { color: var(--green-deep); font-size: 11px; }
 .timeline-update-row > article > header time { color: #6e7c76; font-size: 10px; font-weight: 700; }
 .chronological-history .completion-flow-line { margin: 5px 0; }
-.update-note, .evidences { padding: 11px 12px; }.update-note > span, .evidences > span { color: #76837d; font-size: 10px; font-weight: 800; }.update-note p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }.evidences { border-top: 1px solid #e5ebe8; }.evidences > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }.evidences a { border: 1px solid #c6ddd5; border-radius: 6px; background: #eaf4f0; padding: 5px 8px; color: var(--green-deep); font-size: 10px; font-weight: 800; text-decoration: none; }.evidences a:hover { border-color: #78aa9b; background: #deeee8; }.submitted-at { display: block; border-top: 1px solid #edf1ef; padding: 7px 12px; color: #89948f; font-size: 9px; text-align: right; }
+.update-note, .evidences { padding: 11px 12px; }.update-note > span, .evidences > span { color: var(--color-text-muted); font-size: 10px; font-weight: 800; }.update-note p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }.evidences { border-top: 1px solid #e5ebe8; }.evidences > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }.evidences a { border: 1px solid var(--color-primary-border); border-radius: 6px; background: var(--color-primary-soft); padding: 5px 8px; color: var(--green-deep); font-size: 10px; font-weight: 800; text-decoration: none; }.evidences a:hover { border-color: var(--color-primary); background: var(--color-primary-soft); }.submitted-at { display: block; border-top: 1px solid #edf1ef; padding: 7px 12px; color: var(--color-text-muted); font-size: 9px; text-align: right; }
 .no-update { display: grid; place-items: center; min-height: 160px; margin-top: 14px; border: 1px dashed #cbd8d3; border-radius: 8px; padding: 24px; text-align: center; }.no-update strong { font-size: 13px; }.no-update span { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .activity-review-flow { display: grid; gap: 20px; margin: 8px 20px 26px; padding: 8px 4px 4px; }
 .completion-flow-line { display: flex; align-items: flex-start; gap: 16px; color: oklch(48% .12 220); }

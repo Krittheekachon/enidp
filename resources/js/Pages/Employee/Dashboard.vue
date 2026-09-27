@@ -64,7 +64,7 @@ const defaultLearningMethods = [
         key: 'formal',
         label: 'Formal Learning',
         desc: 'การเรียนรู้อย่างเป็นทางการผ่านหลักสูตรหรือการอบรม',
-        color: '#c7432b',
+        color: '#75292D',
     },
 ];
 
@@ -270,6 +270,6 @@ const logout = () => router.post(route('logout'));
 </template>
 
 <style scoped>
-.nav-count { display: grid; place-items: center; min-width: 20px; height: 20px; margin-left: auto; border-radius: 10px; background: #fff1ec; color: #c7432b; padding: 0 6px; font-size: 10px; font-weight: 900; }
+.nav-count { display: grid; place-items: center; min-width: 20px; height: 20px; margin-left: auto; border-radius: 10px; background: var(--color-primary-soft); color: var(--color-primary); padding: 0 6px; font-size: 10px; font-weight: 900; }
 .nav-item.on .nav-count { background: rgba(255,255,255,.2); color: #fff; }
 </style>

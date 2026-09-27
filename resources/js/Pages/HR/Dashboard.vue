@@ -45,6 +45,10 @@ const props = defineProps({
         type: Object,
         default: () => ({}),
     },
+    supportPositionGroups: {
+        type: Object,
+        default: () => ({}),
+    },
     positionLookup: {
         type: Array,
         default: () => [],
@@ -225,11 +229,20 @@ const updateUsers = () => {};
 const worklineOptions = computed(() => props.worklines || []);
 
 const isSupportWorkline = computed(() => selectedWorkline.value === 'สายสนับสนุน');
+const uniqueSortedPositions = (positions) => Array.from(new Set((positions || []).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right, 'th'));
+const supportGlobalPositions = computed(() => uniqueSortedPositions(
+    Object.values(props.supportPositionGroups || {}).flat(),
+));
 const supportUnitScopes = computed(() => Object.entries(props.supportOrg || {}).flatMap(([division, works]) =>
     (works || []).flatMap((work) => (work.units || []).map((unit) => ({
         key: unit.key || [division, work.work, unit.name].join('|||'),
         label: unit.name,
-        positions: unit.positions || [],
+        jobFamilyName: work.work,
+        positions: uniqueSortedPositions([
+            ...supportGlobalPositions.value,
+            ...(unit.positions || []),
+        ]),
     }))),
 ));
 const organizationScopes = computed(() => {
@@ -248,6 +261,11 @@ const positionOptions = computed(() => {
     return selectedScope.value?.positions || [];
 });
 const needsPositionBeforeMapping = computed(() => Boolean(selectedOrgScope.value && !positionOptions.value.length));
+const selectedSupportGlobalPositions = computed(() => (
+    isSupportWorkline.value
+        ? supportGlobalPositions.value
+        : []
+));
 
 const visiblePositionIds = computed(() => new Set(
     (props.positionLookup || [])
@@ -255,8 +273,11 @@ const visiblePositionIds = computed(() => new Set(
             if (!worklineOptions.value.includes(position.worklineName)) return false;
 
             if (position.worklineName === 'สายสนับสนุน') {
-                const unit = supportUnitScopes.value.find((scope) => scope.key === position.supportUnitKey);
-                return Boolean(unit && unit.positions.includes(position.name));
+                const matchingScopes = position.supportUnitKey
+                    ? supportUnitScopes.value.filter((scope) => scope.key === position.supportUnitKey)
+                    : supportUnitScopes.value;
+
+                return matchingScopes.some((scope) => scope.positions.includes(position.name));
             }
 
             const positions = props.jobFamiliesByWorkline?.[position.worklineName]?.[position.jobFamilyName] || [];
@@ -280,12 +301,22 @@ const unconfiguredPositionCount = computed(() => Math.max(allPositionCount.value
 const positionLabel = computed(() => selectedPosition.value || 'ยังไม่มีข้อมูลตำแหน่ง/ระดับตำแหน่ง');
 const organizationScopeLabel = computed(() => selectedScope.value?.label || (isSupportWorkline.value ? 'ยังไม่มีข้อมูลหน่วย' : 'ยังไม่มีข้อมูลภาควิชา'));
 const currentPosition = computed(() => {
-    return (props.positionLookup || []).find((position) => {
-        if (position.worklineName !== selectedWorkline.value || position.name !== selectedPosition.value) return false;
-        return isSupportWorkline.value
-            ? position.supportUnitKey === selectedOrgScope.value
-            : position.jobFamilyName === selectedOrgScope.value;
-    }) || null;
+    const candidates = (props.positionLookup || []).filter((position) => (
+        position.worklineName === selectedWorkline.value && position.name === selectedPosition.value
+    ));
+
+    if (!isSupportWorkline.value) {
+        return candidates.find((position) => position.jobFamilyName === selectedOrgScope.value) || null;
+    }
+
+    const globalPosition = candidates.find((position) => (
+        !position.supportUnitKey && selectedSupportGlobalPositions.value.includes(position.name)
+    ));
+    const unitPosition = candidates.find((position) => position.supportUnitKey === selectedOrgScope.value);
+
+    return selectedSupportGlobalPositions.value.includes(selectedPosition.value)
+        ? (globalPosition || unitPosition || null)
+        : (unitPosition || globalPosition || null);
 });
 const currentPositionId = computed(() => currentPosition.value?.id || null);
 
@@ -2662,7 +2693,7 @@ const formatWeight = (weight) => {
 
 .no-indicators {
     padding: 16px;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 13px;
     font-style: italic;
 }

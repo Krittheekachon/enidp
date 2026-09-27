@@ -176,13 +176,13 @@ img {
 }
 
 .footer p {
-    color: #8a949e;
+    color: #4b5563;
     font-size: 12px;
     text-align: center;
 }
 
 .footer a {
-    color: #8a949e;
+    color: #4b5563;
     text-decoration: underline;
 }
 
@@ -273,7 +273,7 @@ img {
 }
 
 .panel-content {
-    background-color: #fff2ee;
+    background-color: #f8eeee;
     color: #555d66;
     padding: 16px;
 }

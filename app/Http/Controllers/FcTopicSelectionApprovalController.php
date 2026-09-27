@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Services\AssessmentRoundWindow;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -10,8 +12,10 @@ use Illuminate\Validation\ValidationException;
 
 class FcTopicSelectionApprovalController extends Controller
 {
-    public function __construct(private AssessmentRoundWindow $assessmentRoundWindow)
-    {
+    public function __construct(
+        private AssessmentRoundWindow $assessmentRoundWindow,
+        private NotificationService $notifications,
+    ) {
     }
 
     public function approve(Request $request): RedirectResponse
@@ -32,6 +36,16 @@ class FcTopicSelectionApprovalController extends Controller
                 'reviewed_at' => now(),
                 'updated_at' => now(),
             ]);
+
+        $employee = User::find((int) $selection->user_id);
+        if ($employee) {
+            $this->notifications->notifyEmployeeFcTopicSelectionStatusUpdate(
+                $employee,
+                (int) $selection->id,
+                'approved',
+                trim((string) ($data['comment'] ?? '')),
+            );
+        }
 
         return back()->with('success', 'อนุมัติหัวข้อ FC แล้ว');
     }
@@ -61,6 +75,16 @@ class FcTopicSelectionApprovalController extends Controller
                 'reviewed_at' => now(),
                 'updated_at' => now(),
             ]);
+
+        $employee = User::find((int) $selection->user_id);
+        if ($employee) {
+            $this->notifications->notifyEmployeeFcTopicSelectionStatusUpdate(
+                $employee,
+                (int) $selection->id,
+                'revision_required',
+                $comment,
+            );
+        }
 
         return back()->with('success', 'ส่งหัวข้อ FC กลับให้เลือกใหม่แล้ว');
     }

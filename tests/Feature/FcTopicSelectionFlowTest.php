@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Mail\FcTopicSelectionStatusUpdateMail;
+use App\Mail\FcTopicSelectionSubmittedMail;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -12,6 +14,8 @@ use Tests\TestCase;
 class FcTopicSelectionFlowTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const DEV_NOTIFICATION_RECIPIENT = 'krittheekachon.s@kkumail.com';
 
     public function test_employee_assigned_as_first_reviewer_sees_fc_topic_approval_module(): void
     {
@@ -124,6 +128,11 @@ class FcTopicSelectionFlowTest extends TestCase
             'fc_topic_selection_id' => $selectionId,
             'competency_id' => $selectedFcId,
         ]);
+        Mail::assertSent(FcTopicSelectionSubmittedMail::class, function (FcTopicSelectionSubmittedMail $mail) use ($employee): bool {
+            return $mail->hasTo(self::DEV_NOTIFICATION_RECIPIENT)
+                && $mail->employee->is($employee)
+                && in_array('สมรรถนะ FC1-FLOW-01', $mail->topicNames, true);
+        });
 
         $this->actingAs($supervisor)
             ->post(route('fc-topic-selections.reject'), [
@@ -144,6 +153,12 @@ class FcTopicSelectionFlowTest extends TestCase
             'status' => 'revision_required',
             'review_comment' => 'เลือกใหม่ให้ตรงงานที่รับผิดชอบ',
         ]);
+        Mail::assertSent(FcTopicSelectionStatusUpdateMail::class, function (FcTopicSelectionStatusUpdateMail $mail) use ($employee): bool {
+            return $mail->hasTo(self::DEV_NOTIFICATION_RECIPIENT)
+                && $mail->employee->is($employee)
+                && $mail->status === 'revision_required'
+                && $mail->comment === 'เลือกใหม่ให้ตรงงานที่รับผิดชอบ';
+        });
 
         $this->actingAs($employee)
             ->post(route('employee.fc-topic-selection.submit'), [
@@ -162,6 +177,11 @@ class FcTopicSelectionFlowTest extends TestCase
             'status' => 'approved',
             'reviewed_by' => $supervisor->id,
         ]);
+        Mail::assertSent(FcTopicSelectionStatusUpdateMail::class, function (FcTopicSelectionStatusUpdateMail $mail) use ($employee): bool {
+            return $mail->hasTo(self::DEV_NOTIFICATION_RECIPIENT)
+                && $mail->employee->is($employee)
+                && $mail->status === 'approved';
+        });
 
         $this->actingAs($employee)
             ->post(route('assessments.save'), [
@@ -186,6 +206,67 @@ class FcTopicSelectionFlowTest extends TestCase
                 'note' => '',
             ])
             ->assertSessionHasErrors('assessment');
+    }
+
+    public function test_employee_can_submit_fc_topics_before_self_assessment_window_opens(): void
+    {
+        Mail::fake();
+
+        $roundId = DB::table('assessment_rounds')->insertGetId([
+            'name' => 'รอบทดสอบส่ง FC ล่วงหน้า',
+            'year' => 2569,
+            'self_assess_start' => now()->addWeek()->toDateString(),
+            'self_assess_end' => now()->addMonth()->toDateString(),
+            'supervisor_assess_end' => now()->addMonths(2)->toDateString(),
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        [$positionId, , $selectedFcId] = $this->positionWithCompetencies($roundId);
+
+        DB::table('position_fc_selection_rules')->insert([
+            'assessment_round_id' => $roundId,
+            'position_id' => $positionId,
+            'required_fc_count' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $supervisor = User::factory()->create([
+            'role_id' => $this->roleId('supervisor'),
+        ]);
+        $employee = User::factory()->create([
+            'role_id' => $this->roleId('employee'),
+            'position_id' => $positionId,
+            'is_active' => true,
+        ]);
+
+        DB::table('user_reviewer_steps')->insert([
+            'user_id' => $employee->id,
+            'reviewer_id' => $supervisor->id,
+            'step_order' => 1,
+            'chain_type' => 'assessment',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($employee)
+            ->post(route('employee.fc-topic-selection.submit'), [
+                'competency_ids' => [$selectedFcId],
+            ])
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('fc_topic_selections', [
+            'assessment_round_id' => $roundId,
+            'user_id' => $employee->id,
+            'status' => 'submitted',
+            'submitted_to' => $supervisor->id,
+        ]);
+        Mail::assertSent(FcTopicSelectionSubmittedMail::class, fn (FcTopicSelectionSubmittedMail $mail): bool =>
+            $mail->hasTo(self::DEV_NOTIFICATION_RECIPIENT)
+                && $mail->employee->is($employee)
+        );
     }
 
     private function positionWithCompetencies(int $roundId): array

@@ -203,6 +203,13 @@ const roleOptions = computed(() => (page.props.roles || [
 const supportDeptsList = computed(() => Object.keys(supportOrg.value));
 const supportJobFamilies = computed(() => Object.keys(supportPositionGroups.value));
 const normalizeWorklineName = (name = '') => name.replace(/^สายงาน\s*/, '').replace(/^สาย\s*/, '').trim();
+const normalizeOptionName = (name = '') => String(name || '').trim();
+const optionIncludes = (options, value) => {
+    const normalizedValue = normalizeOptionName(value);
+
+    return Boolean(normalizedValue)
+        && options.some((option) => normalizeOptionName(option) === normalizedValue);
+};
 const selectedWorklineKind = computed(() => normalizeWorklineName(userForm.value.w));
 const selectedWorklineGroups = computed(() => jobFamiliesByWorkline.value[userForm.value.w] || {});
 const levelOptionsFromDatabase = computed(() => {
@@ -211,43 +218,90 @@ const levelOptionsFromDatabase = computed(() => {
 const isAcademicWorkline = computed(() => selectedWorklineKind.value === 'วิชาการ');
 const isSupportWorkline = computed(() => selectedWorklineKind.value === 'สนับสนุน');
 const isAdminWorkline = computed(() => selectedWorklineKind.value === 'บริหาร');
-const selectedDeptWorks = computed(() => supportOrg.value[userForm.value.dept] || []);
+const supportWorksForDepartment = (departmentName = '') => {
+    const selectedDepartment = normalizeOptionName(departmentName);
+    const matchedDepartment = Object.keys(supportOrg.value || {}).find((department) =>
+        normalizeOptionName(department) === selectedDepartment,
+    );
+
+    return matchedDepartment ? supportOrg.value[matchedDepartment] || [] : [];
+};
+const supportWorkForDepartment = (departmentName = '', workName = '') => {
+    const selectedWork = normalizeOptionName(workName);
+
+    return supportWorksForDepartment(departmentName).find((item) =>
+        normalizeOptionName(item.work) === selectedWork,
+    );
+};
+const supportUnitNamesForWork = (departmentName = '', workName = '') =>
+    (supportWorkForDepartment(departmentName, workName)?.units || [])
+        .map((unit) => typeof unit === 'string' ? unit : unit.name)
+        .map(normalizeOptionName)
+        .filter(Boolean);
+const selectedDeptWorks = computed(() => supportWorksForDepartment(userForm.value.dept));
 const jobOptions = computed(() => {
     if (!userForm.value.w) return [];
-    if (isSupportWorkline.value) return selectedDeptWorks.value.map((item) => item.work);
+    if (isSupportWorkline.value) {
+        return Array.from(new Set(
+            selectedDeptWorks.value
+                .map((item) => normalizeOptionName(item.work))
+                .filter(Boolean),
+        ));
+    }
 
     return Object.keys(selectedWorklineGroups.value);
 });
 const legacyJobOption = computed(() => {
     const job = userForm.value.job;
 
-    return job && !jobOptions.value.includes(job) ? job : '';
+    return job && !optionIncludes(jobOptions.value, job) ? job : '';
 });
 const selectedSupportWork = computed(() =>
-    selectedDeptWorks.value.find((item) => item.work === userForm.value.job),
+    supportWorkForDepartment(userForm.value.dept, userForm.value.job),
 );
 const unitOptions = computed(() => {
     if (isSupportWorkline.value) return (selectedSupportWork.value?.units || []).map((unit) => typeof unit === 'string' ? unit : unit.name);
 
     return [];
 });
+const canPickPosition = computed(() => Boolean(userForm.value.w && normalizeOptionName(userForm.value.job)));
 const positionOptions = computed(() => {
+    if (!canPickPosition.value) return [];
+
     if (isSupportWorkline.value) {
-        const unit = (selectedSupportWork.value?.units || []).find((item) =>
-            (typeof item === 'string' ? item : item.name) === userForm.value.unit,
-        );
-        return typeof unit === 'object' ? unit.positions || [] : [];
+        const globalPositions = Object.values(selectedWorklineGroups.value).flat().filter(Boolean);
+        const workPositions = (selectedSupportWork.value?.units || [])
+            .flatMap((unit) => typeof unit === 'object' ? unit.positions || [] : [])
+            .filter(Boolean);
+
+        return Array.from(new Set(
+            [...globalPositions, ...workPositions],
+        )).sort((a, b) => a.localeCompare(b, 'th'));
     }
 
-    if (!userForm.value.job) return [];
+    const selectedJob = normalizeOptionName(userForm.value.job);
+    const matchedJob = Object.keys(selectedWorklineGroups.value).find((job) =>
+        normalizeOptionName(job) === selectedJob,
+    );
 
-    const positions = selectedWorklineGroups.value[userForm.value.job] || [];
-    return positions;
+    return matchedJob ? selectedWorklineGroups.value[matchedJob] || [] : [];
+});
+const positionEmptyLabel = computed(() => {
+    if (!userForm.value.w) return 'เลือกสายงานก่อนเพื่อดูตำแหน่ง';
+    if (!userForm.value.job) return `เลือก${isSupportWorkline.value ? 'งาน' : 'ภาควิชา'}ก่อนเพื่อดูตำแหน่ง`;
+
+    return `ยังไม่มีตำแหน่งใน${isSupportWorkline.value ? 'งาน' : 'ภาควิชา'}นี้`;
+});
+const positionEmptyHelp = computed(() => {
+    if (!userForm.value.w) return 'เลือกสายงานเพื่อดูตำแหน่งของสายงานนั้น';
+    if (!userForm.value.job) return `เลือก${isSupportWorkline.value ? 'งาน' : 'ภาควิชา'}เพื่อเปิดรายการตำแหน่ง`;
+
+    return `กรุณาให้ Admin เพิ่มตำแหน่งใน${isSupportWorkline.value ? 'งาน' : 'ภาควิชา'}นี้ก่อนกำหนดผู้ใช้`;
 });
 const legacyPositionOption = computed(() => {
     const position = userForm.value.p;
 
-    return position && !positionOptions.value.includes(position) ? position : '';
+    return position && !optionIncludes(positionOptions.value, position) ? position : '';
 });
 const levelOptions = computed(() => {
     if (!userForm.value.w) return [];
@@ -257,7 +311,7 @@ const levelOptions = computed(() => {
 const legacyLevelOption = computed(() => {
     const level = userForm.value.l;
 
-    return level && !levelOptions.value.includes(level) ? level : '';
+    return level && !optionIncludes(levelOptions.value, level) ? level : '';
 });
 const currentPageTitle = computed(() => PAGE_TITLES[activePage.value] || props.pageTitle);
 const currentRoleData = computed(() => ROLES_CONFIG[currentRole.value]);
@@ -440,6 +494,11 @@ const selectedIdpReviewerIds = computed(() =>
         .map((id) => selectedEvaluatorId(id))
         .filter(Boolean),
 );
+const effectiveIdpReviewerIds = computed(() =>
+    selectedIdpReviewerIds.value.length
+        ? selectedIdpReviewerIds.value
+        : (selectedEvaluatorId(userForm.value.idp_reviewer_template_id) ? [] : selectedReviewerIds.value),
+);
 const selectedTemplateReviewerIds = computed(() =>
     (assessmentTemplateForm.value.reviewer_ids || [])
         .map((id) => selectedEvaluatorId(id))
@@ -548,6 +607,14 @@ const reviewerSummary = computed(() => {
         .join(' · ');
 });
 const idpReviewerSummary = computed(() => {
+    if (!selectedEvaluatorId(userForm.value.idp_reviewer_template_id) && !selectedIdpReviewerIds.value.length && selectedReviewerIds.value.length) {
+        return selectedReviewerIds.value
+            .map((id, index) => {
+                const person = evaluatorFromId(id);
+                return `${index + 1}. ${person?.displayName || person?.label || id}`;
+            })
+            .join(' -> ') + ' (fallback)';
+    }
     if (!selectedIdpReviewerIds.value.length) return 'ยังไม่ได้กำหนดลำดับการทำ IDP';
 
     return selectedIdpReviewerIds.value
@@ -564,7 +631,7 @@ const userWorkflowIssues = computed(() => {
     if (!selectedReviewerIds.value.length) {
         issues.push('ยังไม่ได้กำหนดลำดับการประเมิน');
     }
-    if (!selectedIdpReviewerIds.value.length) {
+    if (!effectiveIdpReviewerIds.value.length) {
         issues.push('ยังไม่ได้กำหนดลำดับ IDP');
     }
 
@@ -1077,6 +1144,28 @@ const canPickEvaluator1 = computed(() => !['admin', 'supervisor', 'dept_head', '
 const canPickEvaluator2 = computed(() => !['admin', 'dept_head', 'division_head', 'academic_department_head', 'dean'].includes(normalizeUserRoleKey(userForm.value.r)));
 const canPickEvaluator3 = computed(() => !['admin', 'dean'].includes(normalizeUserRoleKey(userForm.value.r)));
 const isDeanRole = computed(() => normalizeUserRoleKey(userForm.value.r) === 'dean');
+const requiresOrganizationStructure = computed(() => !isDeanRole.value);
+const isDeptHeadRole = computed(() => normalizeUserRoleKey(userForm.value.r) === 'dept_head');
+const isDivisionHeadRole = computed(() => normalizeUserRoleKey(userForm.value.r) === 'division_head');
+const requiresSupportWork = computed(() => !(isSupportWorkline.value && isDivisionHeadRole.value));
+const requiresSupportUnit = computed(() => !(isSupportWorkline.value && (isDivisionHeadRole.value || isDeptHeadRole.value)));
+const supportPathCount = computed(() =>
+    [userForm.value.dept, userForm.value.job, userForm.value.unit].filter(Boolean).length,
+);
+const allowsMissingPositionFields = computed(() => {
+    if (isDeanRole.value) return true;
+    if (!isSupportWorkline.value) return false;
+    if (isDivisionHeadRole.value) return supportPathCount.value >= 1 && supportPathCount.value < 3;
+    if (isDeptHeadRole.value) return supportPathCount.value === 2;
+
+    return false;
+});
+const requiresPositionFields = computed(() =>
+    requiresOrganizationStructure.value && Boolean(userForm.value.w) && !allowsMissingPositionFields.value,
+);
+const showsPositionSection = computed(() =>
+    requiresOrganizationStructure.value && Boolean(userForm.value.w),
+);
 
 const requestPageChange = (page) => {
     activePage.value = page;
@@ -1130,24 +1219,29 @@ const handleWorklineChange = () => {
     resetOrgSelection();
 };
 
-const handleDeptChange = () => {
+const handleDeptChange = (event = null) => {
+    if (event?.target) {
+        userForm.value.dept = event.target.value;
+    }
     userForm.value.job = '';
     userForm.value.unit = '';
     userForm.value.p = '';
-    userForm.value.l = '';
     syncOrgPath();
 };
 
-const handleJobChange = () => {
+const handleJobChange = (event = null) => {
+    if (event?.target) {
+        userForm.value.job = event.target.value;
+    }
     userForm.value.unit = '';
-    userForm.value.p = isDeanRole.value ? userForm.value.job : '';
-    userForm.value.l = '';
+    userForm.value.p = '';
+    if (isDeanRole.value) {
+        userForm.value.p = userForm.value.job;
+    }
     syncOrgPath();
 };
 
 const handleUnitChange = () => {
-    userForm.value.p = '';
-    userForm.value.l = '';
     syncOrgPath();
 };
 
@@ -1164,12 +1258,42 @@ const handleRoleChange = () => {
         userForm.value.p = userForm.value.job;
     }
 
+    if (isDeanRole.value) {
+        resetOrgSelection();
+    }
+
     normalizeReviewerList();
 };
+
+const normalizeAcademicTitle = (title) => ({
+    'ผศ.': 'ผศ.ดร.',
+    'รศ.': 'รศ.ดร.',
+    'ศ.': 'ศ.ดร.',
+}[title] || title || '');
 
 const resetUserForm = (data = null) => {
     const org = parseOrgPath(data?.d || '');
     const [firstName = '', ...lastNameParts] = (data?.n || '').split(' ');
+    const initialRole = normalizeUserRoleKey(data?.r || 'employee');
+    const initialWorkline = data?.w || (initialRole === 'dean' ? '' : worklines.value[0] || '');
+    const initialIsSupportWorkline = normalizeWorklineName(initialWorkline) === 'สนับสนุน';
+    const rawSupportDept = initialIsSupportWorkline ? org.dept : '';
+    const initialSupportDeptIsValid = !rawSupportDept
+        || optionIncludes(supportDeptsList.value, rawSupportDept);
+    const initialSupportDept = initialSupportDeptIsValid ? rawSupportDept : '';
+    const initialSupportJob = initialIsSupportWorkline && initialSupportDeptIsValid ? org.job : '';
+    const initialSupportJobIsValid = !initialSupportJob
+        || Boolean(supportWorkForDepartment(initialSupportDept, initialSupportJob));
+    const initialSupportUnit = initialSupportJobIsValid ? org.unit : '';
+    const initialSupportUnitIsValid = !initialSupportUnit
+        || supportUnitNamesForWork(initialSupportDept, initialSupportJob).includes(normalizeOptionName(initialSupportUnit));
+    const initialDepartmentPath = initialIsSupportWorkline
+        ? [
+            initialSupportDept,
+            initialSupportJobIsValid ? initialSupportJob : '',
+            initialSupportJobIsValid && initialSupportUnitIsValid ? initialSupportUnit : '',
+        ].filter(Boolean).join(' > ')
+        : data?.d || '';
 
     editingUserKey.value = data?.sso || null;
     supervisorSearch.value = '';
@@ -1177,7 +1301,7 @@ const resetUserForm = (data = null) => {
     userForm.value = {
         db_id: data?.db_id || null,
         sso: data?.sso || '',
-        t: data?.t || '',
+        t: normalizeAcademicTitle(data?.t),
         n: data?.n || '',
         fn: data?.fn || firstName,
         ln: data?.ln || lastNameParts.join(' '),
@@ -1188,14 +1312,14 @@ const resetUserForm = (data = null) => {
         password: '',
         password_confirmation: '',
         ph: data?.ph || '',
-        w: data?.w || worklines.value[0] || '',
-        d: data?.d || '',
-        dept: '',
-        job: org.job || org.dept,
-        unit: org.unit,
-        p: data?.p || '',
-        l: data?.l || '',
-        r: normalizeUserRoleKey(data?.r || 'employee'),
+        w: initialWorkline,
+        d: initialDepartmentPath,
+        dept: initialSupportDept,
+        job: initialIsSupportWorkline ? (initialSupportJobIsValid ? initialSupportJob : '') : org.job || org.dept,
+        unit: initialIsSupportWorkline && initialSupportJobIsValid && initialSupportUnitIsValid ? initialSupportUnit : '',
+        p: initialIsSupportWorkline && !initialSupportJobIsValid ? '' : data?.p || '',
+        l: initialIsSupportWorkline && !initialSupportJobIsValid ? '' : data?.l || '',
+        r: initialRole,
         reviewer_template_id: data?.reviewer_template_id || '',
         idp_reviewer_template_id: data?.idp_reviewer_template_id || '',
         reviewer_ids: (data?.reviewerSteps || [])
@@ -1221,6 +1345,62 @@ const openModal = (type, data = null) => {
 const closeModal = () => {
     activeModal.value = null;
     editingUserKey.value = null;
+};
+
+const updateUserStatus = (targetUser) => {
+    if (!targetUser?.db_id) {
+        alert('ไม่พบรหัสฐานข้อมูลของผู้ใช้นี้ กรุณารีเฟรชหน้าแล้วลองใหม่');
+        return;
+    }
+
+    const nextActive = targetUser.act === false;
+    if (!nextActive && normalizeUserRoleKey(targetUser.r || '') === 'admin') {
+        alert('ไม่สามารถระงับบัญชีผู้ดูแลระบบได้');
+        return;
+    }
+    if (!nextActive && Number(targetUser.db_id) === Number(page.props.auth?.user?.id || 0)) {
+        alert('ไม่สามารถระงับบัญชีที่กำลังใช้งานอยู่ได้');
+        return;
+    }
+
+    const previousUsers = clone(users.value);
+    const userId = Number(targetUser.db_id);
+    activePage.value = 'admin-users';
+    if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem(adminPageStorageKey, 'admin-users');
+        window.sessionStorage.setItem('cidp.admin.activePage', 'admin-users');
+    }
+
+    users.value = users.value.map((user) =>
+        Number(user.db_id) === userId ? { ...user, act: nextActive } : user,
+    );
+
+    router.visit(`/admin/users/${userId}/status`, {
+        method: 'patch',
+        data: { act: nextActive },
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: (responsePage) => {
+            activePage.value = 'admin-users';
+            if (Array.isArray(responsePage.props.users)) {
+                users.value = clone(responsePage.props.users);
+                return;
+            }
+
+            router.reload({
+                only: ['users'],
+                preserveScroll: true,
+                onSuccess: (reloadPage) => {
+                    users.value = clone(reloadPage.props.users || users.value);
+                },
+            });
+        },
+        onError: (errors) => {
+            users.value = previousUsers;
+            const firstError = Object.values(errors)[0];
+            alert(String(firstError || 'ไม่สามารถบันทึกสถานะผู้ใช้ลงฐานข้อมูลได้'));
+        },
+    });
 };
 
 const saveUser = () => {
@@ -1252,24 +1432,56 @@ const saveUser = () => {
         return;
     }
 
-    const missingOrganization = !form.w
-        || !form.job
-        || (isSupportWorkline.value && (!form.dept || !form.unit));
-    if (missingOrganization || (!isDeanRole.value && !form.p) || !form.l) {
+    const invalidSupportJob = isSupportWorkline.value
+        && Boolean(form.job)
+        && !optionIncludes(jobOptions.value, form.job);
+    const invalidSupportUnit = isSupportWorkline.value
+        && Boolean(form.unit)
+        && !optionIncludes(unitOptions.value, form.unit);
+    const invalidSupportDept = isSupportWorkline.value
+        && Boolean(form.dept)
+        && !optionIncludes(supportDeptsList.value, form.dept);
+    if (invalidSupportDept || invalidSupportJob || invalidSupportUnit) {
+        alert(invalidSupportDept
+            ? 'ฝ่ายนี้ไม่มีในโครงสร้างปัจจุบัน กรุณาเลือกฝ่ายใหม่ก่อนบันทึก'
+            : invalidSupportJob
+            ? 'งานนี้ไม่มีในโครงสร้างปัจจุบัน กรุณาเลือกงานใหม่ก่อนบันทึก'
+            : 'หน่วยนี้ไม่มีในโครงสร้างปัจจุบัน กรุณาเลือกหน่วยใหม่ก่อนบันทึก');
+        return;
+    }
+
+    const missingOrganization = requiresOrganizationStructure.value && (
+        !form.w
+        || (!isSupportWorkline.value && !form.job)
+        || (isSupportWorkline.value && (
+            !form.dept
+            || (requiresSupportWork.value && !form.job)
+            || (requiresSupportUnit.value && !form.unit)
+        ))
+    );
+    const selectedOptionalPosition = !requiresPositionFields.value && canPickPosition.value && Boolean(form.p);
+    const missingPosition = requiresPositionFields.value && (!form.l || (canPickPosition.value && !form.p));
+    const incompleteOptionalPosition = selectedOptionalPosition && !form.l;
+    if (requiresOrganizationStructure.value && (missingOrganization || missingPosition)) {
         alert(isSupportWorkline.value
             ? 'กรุณาเลือกสายงาน ฝ่าย งาน หน่วย ตำแหน่ง และระดับตำแหน่งให้ครบถ้วน'
             : 'กรุณาเลือกสายงาน ภาควิชา ตำแหน่ง และระดับตำแหน่งให้ครบถ้วน');
         return;
     }
 
-    if (!isDeanRole.value && !positionOptions.value.includes(form.p)) {
+    if (incompleteOptionalPosition) {
+        alert('กรุณาเลือกระดับตำแหน่งก่อนบันทึกตำแหน่งนี้');
+        return;
+    }
+
+    if ((requiresPositionFields.value || selectedOptionalPosition) && canPickPosition.value && !optionIncludes(positionOptions.value, form.p)) {
         alert(isSupportWorkline.value
-            ? 'กรุณาให้ Admin เพิ่มตำแหน่งในหน่วยนี้ก่อนบันทึกผู้ใช้'
+            ? 'กรุณาให้ Admin เพิ่มตำแหน่งในงานนี้ก่อนบันทึกผู้ใช้'
             : 'กรุณาให้ Admin เพิ่มตำแหน่งสำหรับภาควิชานี้ก่อนบันทึกผู้ใช้');
         return;
     }
 
-    if (!levelOptions.value.includes(form.l)) {
+    if ((requiresPositionFields.value || form.l) && !optionIncludes(levelOptions.value, form.l)) {
         alert('กรุณาให้ Admin เพิ่มระดับตำแหน่งในสายงานนี้ก่อนบันทึกผู้ใช้');
         return;
     }
@@ -1300,12 +1512,12 @@ const saveUser = () => {
         dept: form.dept.trim(),
         job: form.job.trim(),
         unit: form.unit.trim(),
-        p: (isDeanRole.value ? form.job : form.p).trim(),
-        l: form.l.trim(),
+        p: (isDeanRole.value || !canPickPosition.value || (!requiresPositionFields.value && !form.p) ? '' : form.p).trim(),
+        l: (requiresPositionFields.value || form.p || form.l ? form.l : '').trim(),
         reviewer_template_id: selectedEvaluatorId(form.reviewer_template_id) || null,
         idp_reviewer_template_id: selectedEvaluatorId(form.idp_reviewer_template_id) || null,
         reviewer_ids: selectedReviewerIds.value,
-        idp_reviewer_ids: selectedIdpReviewerIds.value,
+        idp_reviewer_ids: effectiveIdpReviewerIds.value,
         act: Boolean(form.act),
     };
 
@@ -1470,6 +1682,7 @@ const logout = () => router.post(route('logout'));
                     v-else-if="activePage === 'admin-users'"
                     :open-modal="openModal"
                     :open-reviewer-template-modal="openReviewerTemplateModal"
+                    :update-user-status="updateUserStatus"
                     :users="users"
                     :set-users="setRef(users)"
                     :academic-depts="academicPositions"
@@ -1625,10 +1838,11 @@ const logout = () => router.post(route('logout'));
                             <option value="">— เลือกคำนำหน้า —</option>
                             <option value="นาย">นาย</option>
                             <option value="นาง">นาง</option>
+                            <option value="นางสาว">นางสาว</option>
                             <option value="ดร.">ดร.</option>
-                            <option value="ผศ.">ผศ.</option>
-                            <option value="รศ.">รศ.</option>
-                            <option value="ศ.">ศ.</option>
+                            <option value="ผศ.ดร.">ผศ.ดร.</option>
+                            <option value="รศ.ดร.">รศ.ดร.</option>
+                            <option value="ศ.ดร.">ศ.ดร.</option>
                         </select>
                     </div>
                 </div>
@@ -1662,8 +1876,8 @@ const logout = () => router.post(route('logout'));
                     </div>
                 </div>
 
-                <div class="modal-section-label">โครงสร้างสังกัด</div>
-                <div class="modal-grid" :class="{ 'single-col': !userForm.w }">
+                <div v-if="requiresOrganizationStructure" class="modal-section-label">โครงสร้างสังกัด</div>
+                <div v-if="requiresOrganizationStructure" class="modal-grid" :class="{ 'single-col': !userForm.w }">
                     <div class="fg">
                         <label class="lbl req">สายงาน</label>
                         <select v-model="userForm.w" class="sel modal-input" @change="handleWorklineChange">
@@ -1683,7 +1897,7 @@ const logout = () => router.post(route('logout'));
                     </div>
 
                     <div v-if="userForm.w && (!isSupportWorkline || userForm.dept)" class="fg">
-                        <label class="lbl req">{{ isSupportWorkline ? 'งาน' : 'ภาควิชา' }}</label>
+                        <label class="lbl" :class="{ req: !isSupportWorkline || requiresSupportWork }">{{ isSupportWorkline ? 'งาน' : 'ภาควิชา' }}</label>
                         <select v-model="userForm.job" class="sel modal-input" @change="handleJobChange">
                             <option value="">— เลือก{{ isSupportWorkline ? 'งาน' : 'ภาควิชา' }} —</option>
                             <option v-if="legacyJobOption" :value="legacyJobOption">
@@ -1699,7 +1913,7 @@ const logout = () => router.post(route('logout'));
                     </div>
 
                     <div v-if="isSupportWorkline && userForm.job" class="fg">
-                        <label class="lbl req">หน่วย</label>
+                        <label class="lbl" :class="{ req: requiresSupportUnit }">หน่วย</label>
                         <select v-model="userForm.unit" class="sel modal-input" @change="handleUnitChange">
                             <option value="">— เลือกหน่วย —</option>
                             <option v-for="unit in unitOptions" :key="unit" :value="unit">{{ unit }}</option>
@@ -1707,18 +1921,18 @@ const logout = () => router.post(route('logout'));
                     </div>
                 </div>
 
-                <div v-if="userForm.job && (!isSupportWorkline || userForm.unit)" class="modal-section-label">ข้อมูลตำแหน่ง</div>
-                <div v-if="userForm.job && (!isSupportWorkline || userForm.unit)" class="modal-grid">
+                <div v-if="showsPositionSection" class="modal-section-label">ข้อมูลตำแหน่ง</div>
+                <div v-if="showsPositionSection" class="modal-grid">
                     <div v-if="!isDeanRole" class="fg">
-                        <label class="lbl req">ตำแหน่ง</label>
+                        <label class="lbl" :class="{ req: requiresPositionFields && canPickPosition }">ตำแหน่ง</label>
                         <select
                             v-model="userForm.p"
                             class="sel modal-input"
-                            :disabled="!positionOptions.length && !legacyPositionOption"
+                            :disabled="!canPickPosition || (!positionOptions.length && !legacyPositionOption)"
                             @change="handlePositionChange"
                         >
                             <option v-if="positionOptions.length" value="">— เลือกตำแหน่ง —</option>
-                            <option v-else value="">{{ isSupportWorkline ? 'ยังไม่มีตำแหน่งในหน่วย' : 'ยังไม่มีตำแหน่งสำหรับภาควิชา' }}</option>
+                            <option v-else value="">{{ positionEmptyLabel }}</option>
                             <option v-if="legacyPositionOption" :value="legacyPositionOption">
                                 {{ legacyPositionOption }} (ข้อมูลเดิม)
                             </option>
@@ -1727,10 +1941,10 @@ const logout = () => router.post(route('logout'));
                             </option>
                         </select>
                         <div v-if="legacyPositionOption" class="modal-help warning">
-                            ตำแหน่งนี้ไม่มีใน{{ isSupportWorkline ? 'หน่วย' : 'ภาควิชา' }}ปัจจุบัน กรุณาเลือกตำแหน่งใหม่ก่อนบันทึก
+                            ตำแหน่งนี้ไม่มีในสายงานปัจจุบัน กรุณาเลือกตำแหน่งใหม่ก่อนบันทึก
                         </div>
                         <div v-if="!positionOptions.length" class="modal-help">
-                            กรุณาให้ Admin เพิ่มตำแหน่งใน{{ isSupportWorkline ? 'หน่วย' : 'ภาควิชา' }}ก่อนกำหนดผู้ใช้
+                            {{ positionEmptyHelp }}
                         </div>
                     </div>
                     <div v-else class="fg">
@@ -1740,8 +1954,8 @@ const logout = () => router.post(route('logout'));
                             บทบาทคณบดีใช้ภาควิชาเป็นตำแหน่งโดยอัตโนมัติ
                         </div>
                     </div>
-                    <div v-if="userForm.p || isDeanRole" class="fg">
-                        <label class="lbl req">ระดับตำแหน่ง</label>
+                    <div class="fg">
+                        <label class="lbl" :class="{ req: requiresPositionFields }">ระดับตำแหน่ง</label>
                         <select v-model="userForm.l" class="sel modal-input" :disabled="!levelOptions.length && !legacyLevelOption">
                             <option v-if="levelOptions.length" value="">— เลือกระดับตำแหน่ง —</option>
                             <option v-else value="">ยังไม่มีระดับตำแหน่งในสายงานหรือกลุ่มงาน</option>
@@ -2403,13 +2617,13 @@ const logout = () => router.post(route('logout'));
 }
 
 .modal-input:disabled {
-    background: #eef2f7;
-    color: #94a3b8;
+    background: var(--color-disabled-bg);
+    color: var(--color-disabled-text);
 }
 
 .modal-help {
     margin-top: 7px;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 12px;
     font-weight: 700;
     line-height: 1.45;
@@ -2599,9 +2813,9 @@ const logout = () => router.post(route('logout'));
 }
 
 .reviewer-modal {
-    width: min(680px, 100%);
+    width: min(720px, 100%);
     max-height: min(82vh, 720px);
-    overflow-y: auto;
+    overflow: visible;
     border: 1px solid #dbe3ef;
     border-radius: 12px;
     background: #fff;
@@ -2750,7 +2964,7 @@ const logout = () => router.post(route('logout'));
 
 .reviewer-template-step-meta {
     margin-top: 3px;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 11px;
     font-weight: 700;
 }
@@ -3294,9 +3508,11 @@ const logout = () => router.post(route('logout'));
     display: grid;
     gap: 10px;
     padding: 18px 20px;
+    overflow: visible;
 }
 
 .reviewer-step-row {
+    position: relative;
     display: grid;
     grid-template-columns: 38px minmax(0, 1fr) auto;
     align-items: end;
@@ -3305,6 +3521,11 @@ const logout = () => router.post(route('logout'));
     border: 1px solid #dbe3ef;
     border-radius: 8px;
     background: #f8fafc;
+    overflow: visible;
+}
+
+.reviewer-step-row:has(.reviewer-choice-list) {
+    z-index: 10;
 }
 
 .reviewer-step-badge {
@@ -3322,6 +3543,7 @@ const logout = () => router.post(route('logout'));
 .reviewer-step-main {
     position: relative;
     min-width: 0;
+    overflow: visible;
 }
 
 .reviewer-step-main .lbl {
@@ -3347,9 +3569,11 @@ const logout = () => router.post(route('logout'));
     top: calc(100% + 6px);
     left: 0;
     right: 0;
-    z-index: 3;
+    z-index: 120;
     display: grid;
     gap: 6px;
+    box-sizing: border-box;
+    width: auto;
     max-height: 220px;
     padding: 8px;
     overflow-y: auto;
@@ -3404,7 +3628,7 @@ const logout = () => router.post(route('logout'));
     padding: 10px 12px;
     border: 1px dashed #cbd5e1;
     border-radius: 8px;
-    color: #94a3b8;
+    color: var(--color-text-muted);
     font-size: 13px;
     font-weight: 700;
 }

@@ -151,7 +151,7 @@ class AssessmentController extends Controller
         $employee = User::findOrFail((int) $data['user_id']);
         $competencyName = $this->competencyName((int) ($data['competency_id'] ?? 0));
 
-        DB::transaction(function () use ($data, $decision, $request, $comment): void {
+        DB::transaction(function () use ($data, $decision, $request, $comment, $employee): void {
             $assessmentIds = Assessment::where('user_id', $data['user_id'])
                 ->where('competency_id', $data['competency_id'])
                 ->where('assessment_round_id', $this->activeAssessmentRoundId())
@@ -163,6 +163,13 @@ class AssessmentController extends Controller
                 $decision['review_step'],
                 $comment,
                 'approved'
+            );
+
+            $this->ensureCompetencyGapsForAssessments(
+                $assessmentIds,
+                $employee,
+                (int) $data['competency_id'],
+                $decision['expected_status']
             );
 
             Assessment::whereIn('id', $assessmentIds)
@@ -431,6 +438,44 @@ class AssessmentController extends Controller
         );
 
         return $savedAt;
+    }
+
+    private function ensureCompetencyGapsForAssessments($assessmentIds, User $employee, int $competencyId, string $status): void
+    {
+        $now = now();
+        $expectedLevel = $this->expectedLevelResolver->forUserCompetency($employee, $competencyId);
+
+        Assessment::query()
+            ->whereIn('id', $assessmentIds)
+            ->where('competency_id', $competencyId)
+            ->where('status', $status)
+            ->get(['id', 'score'])
+            ->each(function (Assessment $assessment) use ($competencyId, $expectedLevel, $status, $now): void {
+                $actualLevel = round((float) ($assessment->score ?? 0), 2);
+                $gap = $expectedLevel === null ? null : round($actualLevel - $expectedLevel, 2);
+                $attributes = [
+                    'assessment_id' => $assessment->id,
+                    'competency_id' => $competencyId,
+                ];
+                $values = [
+                    'expected_level' => $expectedLevel,
+                    'actual_level' => $actualLevel,
+                    'gap' => $gap,
+                    'requires_idp' => $gap !== null && $gap < 0,
+                    'status' => $status,
+                    'updated_at' => $now,
+                ];
+
+                if (DB::table('competency_gaps')->where($attributes)->exists()) {
+                    DB::table('competency_gaps')->where($attributes)->update($values);
+
+                    return;
+                }
+
+                DB::table('competency_gaps')->insert($attributes + $values + [
+                    'created_at' => $now,
+                ]);
+            });
     }
 
     private function activeAssessmentRoundId(): int

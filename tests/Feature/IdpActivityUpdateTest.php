@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Mail\IdpProgressSubmittedMail;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -13,6 +15,8 @@ use Inertia\Testing\AssertableInertia as Assert;
 class IdpActivityUpdateTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const DEV_NOTIFICATION_RECIPIENT = 'krittheekachon.s@kkumail.com';
 
     public function test_employee_cannot_save_an_incomplete_progress_draft(): void
     {
@@ -81,6 +85,36 @@ class IdpActivityUpdateTest extends TestCase
         $this->assertDatabaseCount('idp_activity_updates', 2);
         $this->assertDatabaseHas('idp_activity_update_evidences', ['kind' => 'link']);
         $this->assertDatabaseHas('idp_activity_update_evidences', ['kind' => 'image', 'original_name' => 'screen.png']);
+    }
+
+    public function test_saving_progress_does_not_notify_until_completion_is_submitted(): void
+    {
+        Mail::fake();
+        [$employee, $activityId, $itemId] = $this->approvedActivity();
+        $reviewer = User::factory()->create([
+            'role_id' => $this->roleId('supervisor'),
+        ]);
+        DB::table('user_reviewer_steps')->insert([
+            'user_id' => $employee->id,
+            'chain_type' => 'idp',
+            'step_order' => 1,
+            'reviewer_id' => $reviewer->id,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->submitProgress($employee, $activityId, 0);
+        Mail::assertNothingSent();
+
+        $this->submitProgress($employee, $activityId, 1);
+        $this->actingAs($employee)->post(route('employee.idp-items.submit-completion'), [
+            'idpItemId' => $itemId,
+        ])->assertSessionHasNoErrors();
+
+        Mail::assertSent(IdpProgressSubmittedMail::class, function (IdpProgressSubmittedMail $mail) use ($employee): bool {
+            return $mail->hasTo(self::DEV_NOTIFICATION_RECIPIENT)
+                && $mail->employee->is($employee);
+        });
     }
 
     public function test_faculty_analytics_viewer_can_open_submitted_evidence_but_unrelated_employee_cannot(): void

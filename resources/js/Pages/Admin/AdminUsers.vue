@@ -45,10 +45,24 @@
         </option>
       </select>
 
-      <select v-model="departmentFilter" class="sel department-select">
-        <option>ทุกหน่วยงาน/ภาควิชา</option>
+      <select v-if="!isSupportFilterMode" v-model="departmentFilter" class="sel department-select">
+        <option>{{ allDepartmentsLabel }}</option>
         <option v-for="department in departmentOptions" :key="department" :value="department">
           {{ department }}
+        </option>
+      </select>
+
+      <select v-else v-model="supportWorkFilter" class="sel department-select">
+        <option>{{ allSupportWorksLabel }}</option>
+        <option v-for="work in supportWorkOptions" :key="work" :value="work">
+          {{ work }}
+        </option>
+      </select>
+
+      <select v-if="showSupportUnitFilter" v-model="supportUnitFilter" class="sel unit-select">
+        <option>{{ allSupportUnitsLabel }}</option>
+        <option v-for="unit in supportUnitOptions" :key="unit" :value="unit">
+          {{ unit }}
         </option>
       </select>
 
@@ -160,9 +174,9 @@
                   class="btn btn-r btn-xs status-btn"
                   type="button"
                   :class="isActive(user) ? 'suspend' : 'activate'"
-                  :disabled="isCurrentUser(user) && isActive(user)"
+                  :disabled="isStatusActionDisabled(user)"
                   :title="statusActionTitle(user)"
-                  @click="toggleStatus(user)"
+                  @click.stop="toggleStatus(user)"
                 >
                   {{ isActive(user) ? 'ระงับ' : 'เปิด' }}
                 </button>
@@ -181,7 +195,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { router, usePage } from '@inertiajs/vue3';
+import { usePage } from '@inertiajs/vue3';
 import { ExcelImportModal } from '../../Components/SharedUI.vue';
 
 type User = {
@@ -211,6 +225,7 @@ type RoleBadge = {
 const props = defineProps<{
   openModal: (type: string, data?: unknown) => void;
   openReviewerTemplateModal: (chainType?: string) => void;
+  updateUserStatus: (user: User) => void;
   users: User[];
   setUsers: (next: User[] | ((users: User[]) => User[])) => void;
   academicDepts: string[];
@@ -221,11 +236,22 @@ const props = defineProps<{
 
 const showImport = ref(false);
 const search = ref('');
-const worklineFilter = ref('ทุกสายงาน');
-const departmentFilter = ref('ทุกหน่วยงาน/ภาควิชา');
-const positionFilter = ref('ทุกตำแหน่ง');
-const roleFilter = ref('ทุกบทบาท (Role)');
-const statusFilter = ref('ทุกสถานะ');
+const allWorklinesLabel = 'ทุกสายงาน';
+const allDepartmentsLabel = 'ทุกหน่วยงาน/ภาควิชา';
+const allSupportWorksLabel = 'ทุกงาน';
+const allSupportUnitsLabel = 'ทุกหน่วย';
+const allPositionsLabel = 'ทุกตำแหน่ง';
+const allRolesLabel = 'ทุกบทบาท (Role)';
+const allStatusesLabel = 'ทุกสถานะ';
+const activeStatusLabel = 'ปกติ / ใช้งาน';
+const supportWorklineNames = ['สายสนับสนุน', 'สายงานสนับสนุน'];
+const worklineFilter = ref(allWorklinesLabel);
+const departmentFilter = ref(allDepartmentsLabel);
+const supportWorkFilter = ref(allSupportWorksLabel);
+const supportUnitFilter = ref(allSupportUnitsLabel);
+const positionFilter = ref(allPositionsLabel);
+const roleFilter = ref(allRolesLabel);
+const statusFilter = ref(allStatusesLabel);
 const page = usePage();
 const currentUserId = computed(() => Number(page.props.auth?.user?.id || 0));
 const roleOptions = [
@@ -240,11 +266,21 @@ const roleOptions = [
 ];
 
 const getDisplayLevel = (user: User) => (user.w === 'สายงานบริหาร' ? user.p : user.l);
+const isSupportUser = (user: User) => supportWorklineNames.includes(user.w || '');
+const supportPath = (user: User) => {
+  const [department = '', work = '', ...unitParts] = (user.d || '').split(' > ').map((part) => part.trim()).filter(Boolean);
+
+  return {
+    department,
+    work,
+    unit: unitParts.join(' > '),
+  };
+};
 const organizationUnit = (user: User) => {
   const parts = (user.d || '').split(' > ').map((part) => part.trim()).filter(Boolean);
   if (!parts.length) return '';
 
-  return user.w === 'สายสนับสนุน' || user.w === 'สายงานสนับสนุน'
+  return isSupportUser(user)
     ? parts[parts.length - 1]
     : parts[0];
 };
@@ -252,11 +288,20 @@ const avatarInitial = (user: User) => user.n?.[0] || '?';
 const openModal = (type: string, data?: unknown) => props.openModal(type, data);
 const openReviewerTemplateModal = (chainType?: string) => props.openReviewerTemplateModal(chainType);
 const worklineOptions = computed(() => props.worklines || []);
+const isSupportFilterMode = computed(() => supportWorklineNames.includes(worklineFilter.value));
+const showSupportUnitFilter = computed(() =>
+  isSupportFilterMode.value && supportWorkFilter.value !== allSupportWorksLabel,
+);
 const isActive = (user: User) => user.act !== false;
+const isAdminRole = (user: User) => user.r === 'admin';
 const isCurrentUser = (user: User) => Boolean(user.db_id && Number(user.db_id) === currentUserId.value);
+const isStatusActionDisabled = (user: User) => isActive(user) && (isCurrentUser(user) || isAdminRole(user));
 const statusActionTitle = (user: User) => {
   if (isCurrentUser(user) && isActive(user)) {
     return 'ไม่สามารถระงับบัญชีที่กำลังใช้งานอยู่ได้';
+  }
+  if (isAdminRole(user) && isActive(user)) {
+    return 'ไม่สามารถระงับบัญชีผู้ดูแลระบบได้';
   }
 
   return isActive(user) ? 'ระงับบัญชีผู้ใช้นี้' : 'เปิดใช้งานบัญชีผู้ใช้นี้';
@@ -266,16 +311,48 @@ const structureIssueText = (user: User) => (user.structureIssues || []).join('\n
 const invalidStructureCount = computed(() => props.users.filter(hasInvalidStructure).length);
 const departmentOptions = computed(() => {
   const departments = props.users
-    .filter((user) => worklineFilter.value === 'ทุกสายงาน' || user.w === worklineFilter.value)
+    .filter((user) => worklineFilter.value === allWorklinesLabel || user.w === worklineFilter.value)
     .map(organizationUnit)
     .filter(Boolean);
 
   return Array.from(new Set(departments)).sort((a, b) => a.localeCompare(b, 'th'));
 });
+const supportWorkOptions = computed(() => {
+  const works = props.users
+    .filter(isSupportUser)
+    .map((user) => supportPath(user).work)
+    .filter(Boolean);
+
+  return Array.from(new Set(works)).sort((a, b) => a.localeCompare(b, 'th'));
+});
+const supportUnitOptions = computed(() => {
+  if (supportWorkFilter.value === allSupportWorksLabel) return [];
+
+  const units = props.users
+    .filter(isSupportUser)
+    .filter((user) => supportPath(user).work === supportWorkFilter.value)
+    .map((user) => supportPath(user).unit)
+    .filter(Boolean);
+
+  return Array.from(new Set(units)).sort((a, b) => a.localeCompare(b, 'th'));
+});
+const matchesOrganizationFilter = (user: User) => {
+  if (isSupportFilterMode.value) {
+    if (!isSupportUser(user)) return false;
+
+    const path = supportPath(user);
+    const matchesWork = supportWorkFilter.value === allSupportWorksLabel || path.work === supportWorkFilter.value;
+    const matchesUnit = supportUnitFilter.value === allSupportUnitsLabel || path.unit === supportUnitFilter.value;
+
+    return matchesWork && matchesUnit;
+  }
+
+  return departmentFilter.value === allDepartmentsLabel || organizationUnit(user) === departmentFilter.value;
+};
 const positionOptions = computed(() => {
   const positions = props.users
-    .filter((user) => worklineFilter.value === 'ทุกสายงาน' || user.w === worklineFilter.value)
-    .filter((user) => departmentFilter.value === 'ทุกหน่วยงาน/ภาควิชา' || organizationUnit(user) === departmentFilter.value)
+    .filter((user) => worklineFilter.value === allWorklinesLabel || user.w === worklineFilter.value)
+    .filter(matchesOrganizationFilter)
     .map((user) => user.p || '')
     .filter(Boolean);
 
@@ -283,23 +360,46 @@ const positionOptions = computed(() => {
 });
 
 watch(worklineFilter, () => {
-  departmentFilter.value = 'ทุกหน่วยงาน/ภาควิชา';
-  positionFilter.value = 'ทุกตำแหน่ง';
+  departmentFilter.value = allDepartmentsLabel;
+  supportWorkFilter.value = allSupportWorksLabel;
+  supportUnitFilter.value = allSupportUnitsLabel;
+  positionFilter.value = allPositionsLabel;
 });
 
 watch(departmentFilter, () => {
-  positionFilter.value = 'ทุกตำแหน่ง';
+  positionFilter.value = allPositionsLabel;
+});
+
+watch(supportWorkFilter, () => {
+  supportUnitFilter.value = allSupportUnitsLabel;
+  positionFilter.value = allPositionsLabel;
+});
+
+watch(supportUnitFilter, () => {
+  positionFilter.value = allPositionsLabel;
 });
 
 watch(departmentOptions, (options) => {
-  if (departmentFilter.value !== 'ทุกหน่วยงาน/ภาควิชา' && !options.includes(departmentFilter.value)) {
-    departmentFilter.value = 'ทุกหน่วยงาน/ภาควิชา';
+  if (departmentFilter.value !== allDepartmentsLabel && !options.includes(departmentFilter.value)) {
+    departmentFilter.value = allDepartmentsLabel;
+  }
+});
+
+watch(supportWorkOptions, (options) => {
+  if (supportWorkFilter.value !== allSupportWorksLabel && !options.includes(supportWorkFilter.value)) {
+    supportWorkFilter.value = allSupportWorksLabel;
+  }
+});
+
+watch(supportUnitOptions, (options) => {
+  if (supportUnitFilter.value !== allSupportUnitsLabel && !options.includes(supportUnitFilter.value)) {
+    supportUnitFilter.value = allSupportUnitsLabel;
   }
 });
 
 watch(positionOptions, (options) => {
-  if (positionFilter.value !== 'ทุกตำแหน่ง' && !options.includes(positionFilter.value)) {
-    positionFilter.value = 'ทุกตำแหน่ง';
+  if (positionFilter.value !== allPositionsLabel && !options.includes(positionFilter.value)) {
+    positionFilter.value = allPositionsLabel;
   }
 });
 
@@ -345,12 +445,12 @@ const filteredUsers = computed(() => {
     const matchesSearch = !keyword
       || name.toLowerCase().includes(keyword)
       || id.toLowerCase().includes(keyword);
-    const matchesWorkline = worklineFilter.value === 'ทุกสายงาน' || user.w === worklineFilter.value;
-    const matchesDepartment = departmentFilter.value === 'ทุกหน่วยงาน/ภาควิชา' || organizationUnit(user) === departmentFilter.value;
-    const matchesPosition = positionFilter.value === 'ทุกตำแหน่ง' || user.p === positionFilter.value;
-    const matchesRole = roleFilter.value === 'ทุกบทบาท (Role)' || roleName(user.r) === roleFilter.value;
-    const matchesStatus = statusFilter.value === 'ทุกสถานะ'
-      || (statusFilter.value === 'ปกติ / ใช้งาน' ? isActive(user) : !isActive(user));
+    const matchesWorkline = worklineFilter.value === allWorklinesLabel || user.w === worklineFilter.value;
+    const matchesDepartment = matchesOrganizationFilter(user);
+    const matchesPosition = positionFilter.value === allPositionsLabel || user.p === positionFilter.value;
+    const matchesRole = roleFilter.value === allRolesLabel || roleName(user.r) === roleFilter.value;
+    const matchesStatus = statusFilter.value === allStatusesLabel
+      || (statusFilter.value === activeStatusLabel ? isActive(user) : !isActive(user));
 
     return matchesSearch && matchesWorkline && matchesDepartment && matchesPosition && matchesRole && matchesStatus;
   }).sort((a, b) => String(b.sso || '').localeCompare(String(a.sso || ''), 'th', {
@@ -365,33 +465,16 @@ const toggleStatus = (user: User) => {
     return;
   }
 
-  const nextActive = !isActive(user);
-  if (!nextActive && isCurrentUser(user)) {
+  if (isStatusActionDisabled(user)) {
+    if (isAdminRole(user)) {
+      alert('ไม่สามารถระงับบัญชีผู้ดูแลระบบได้');
+      return;
+    }
     alert('ไม่สามารถระงับบัญชีที่กำลังใช้งานอยู่ได้');
     return;
   }
 
-  const previousUsers = [...props.users];
-  const userKey = user.db_id;
-
-  window.sessionStorage.setItem('cidp.admin.activePage', 'admin-users');
-  props.setUsers((users) => users.map((u) => (u.db_id === userKey ? { ...u, act: nextActive } : u)));
-
-  router.patch(route('admin.users.status', user.db_id), {
-    act: nextActive,
-  }, {
-    preserveScroll: true,
-    preserveState: true,
-    onSuccess: (page) => {
-      if (Array.isArray(page.props.users)) {
-        props.setUsers(page.props.users as User[]);
-      }
-    },
-    onError: () => {
-      props.setUsers(previousUsers);
-      alert('ไม่สามารถบันทึกสถานะผู้ใช้ลงฐานข้อมูลได้');
-    },
-  });
+  props.updateUserStatus(user);
 };
 
 </script>
@@ -474,13 +557,14 @@ const toggleStatus = (user: User) => {
 
 .filter-row {
   display: grid;
-  grid-template-columns: minmax(210px, 1.5fr) minmax(130px, 0.9fr) minmax(170px, 1.2fr) minmax(160px, 1.1fr) minmax(160px, 1fr) minmax(120px, 0.8fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
 .search-input {
   width: 100%;
   max-width: none;
+  min-width: 210px;
 }
 
 .workline-select {
@@ -488,6 +572,10 @@ const toggleStatus = (user: User) => {
 }
 
 .department-select {
+  width: 100%;
+}
+
+.unit-select {
   width: 100%;
 }
 
@@ -662,7 +750,7 @@ const toggleStatus = (user: User) => {
   cursor: not-allowed;
   border-color: #e5e7eb;
   background: #f3f6fb;
-  color: #94a3b8;
+  color: var(--color-text-muted);
   opacity: 1;
 }
 

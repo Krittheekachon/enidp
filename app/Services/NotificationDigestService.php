@@ -23,6 +23,10 @@ class NotificationDigestService
     private const UNMAPPED_POSITION_USERS_KEY = 'digest_unmapped_position_users';
     private const DAILY_SENT_KEY = 'digest_daily_sent_on';
 
+    public function __construct(private NotificationRecipientResolver $recipientResolver)
+    {
+    }
+
     public function queueIncompleteUser(User $user): void
     {
         $users = Cache::get(self::NEW_USERS_KEY, []);
@@ -301,17 +305,21 @@ class NotificationDigestService
     private function sendToUsers($users, $mailable): void
     {
         $users->each(function (User $user) use ($mailable): void {
-            if ($user->email) {
-                try {
-                    Mail::to($user)->send(clone $mailable);
-                } catch (Throwable $exception) {
-                    Log::warning('Unable to send digest notification email.', [
-                        'user_id' => $user->id,
-                        'recipient' => $user->email,
-                        'mail' => $mailable::class,
-                        'message' => $exception->getMessage(),
-                    ]);
-                }
+            $recipient = $this->recipientResolver->recipientsFor($user);
+            if (! $recipient) {
+                return;
+            }
+
+            try {
+                Mail::to($recipient)->send(clone $mailable);
+            } catch (Throwable $exception) {
+                Log::warning('Unable to send digest notification email.', [
+                    'user_id' => $user->id,
+                    'recipient' => $this->recipientResolver->recipientLabelFor($user),
+                    'intended_recipient' => $user->email,
+                    'mail' => $mailable::class,
+                    'message' => $exception->getMessage(),
+                ]);
             }
         });
     }

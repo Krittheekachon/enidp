@@ -16,10 +16,20 @@ class RoleMiddleware
     public function handle(Request $request, Closure $next, string ...$roles): Response
     {
         if (! auth()->check()) {
+            if ($request->header('X-Inertia')) {
+                return redirect()->route('login');
+            }
+
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
         if (! auth()->user()->hasRole($roles)) {
+            if ($request->header('X-Inertia')) {
+                return back()->withErrors([
+                    'authorization' => 'คุณไม่มีสิทธิ์ดำเนินการนี้',
+                ]);
+            }
+
             return response()->json(['message' => 'Forbidden'], 403);
         }
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Employee;
 use App\Http\Controllers\Controller;
 use App\Services\AssessmentRoundWindow;
 use App\Services\IdpItemReviewWorkflow;
+use App\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,6 +25,7 @@ class IdpController extends Controller
     public function __construct(
         private readonly IdpItemReviewWorkflow $reviewWorkflow,
         private readonly AssessmentRoundWindow $assessmentRoundWindow,
+        private readonly NotificationService $notifications,
     ) {
     }
 
@@ -43,7 +45,10 @@ class IdpController extends Controller
 
     public function submit(Request $request): RedirectResponse
     {
-        $this->persist($request, 'submitted');
+        $submittedItemIds = $this->persist($request, 'submitted');
+        foreach ($submittedItemIds as $idpItemId) {
+            $this->notifications->notifyIdpReviewerForItem($request->user(), $idpItemId);
+        }
 
         return back()->with('success', 'ส่งแผน IDP ให้หัวหน้าอนุมัติแล้ว');
     }
@@ -53,12 +58,15 @@ class IdpController extends Controller
         $request->merge([
             'items' => [$request->input('item', [])],
         ]);
-        $this->persist($request, 'submitted');
+        $submittedItemIds = $this->persist($request, 'submitted');
+        foreach ($submittedItemIds as $idpItemId) {
+            $this->notifications->notifyIdpReviewerForItem($request->user(), $idpItemId);
+        }
 
         return back()->with('success', 'ส่งแผนสมรรถนะนี้ให้หัวหน้าอนุมัติแล้ว');
     }
 
-    private function persist(Request $request, string $status): void
+    private function persist(Request $request, string $status): array
     {
         $required = $status === 'submitted' ? 'required' : 'nullable';
         $validated = $request->validate([
@@ -150,7 +158,9 @@ class IdpController extends Controller
             ->where('id', auth()->id())
             ->first(['id']);
 
-        DB::transaction(function () use ($items, $status, $methodIdsByKey, $toolsById, $catalogsById, $owner): void {
+        $submittedItemIds = [];
+
+        DB::transaction(function () use ($items, $status, $methodIdsByKey, $toolsById, $catalogsById, $owner, &$submittedItemIds): void {
             $idpId = $this->currentUserIdpId();
             foreach ($items as $item) {
                 $gapId = (int) $item['competencyGapId'];
@@ -214,6 +224,10 @@ class IdpController extends Controller
                     ]);
                 }
 
+                if ($isSubmission) {
+                    $submittedItemIds[] = $itemId;
+                }
+
                 foreach ($item['activities'] ?? [] as $activity) {
                     $tool = ! empty($activity['developmentToolId'])
                         ? $toolsById->get($activity['developmentToolId'])
@@ -257,6 +271,8 @@ class IdpController extends Controller
 
             $this->reviewWorkflow->syncParentStatus($idpId);
         });
+
+        return $submittedItemIds;
     }
 
     private function validateUniqueGaps(Collection $items): void

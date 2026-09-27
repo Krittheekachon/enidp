@@ -5,6 +5,7 @@ import { createInertiaApp } from '@inertiajs/vue3';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { createApp, h } from 'vue';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
+import { installModalEnterSubmit } from './modalEnterSubmit';
 
 const appName = 'EN-IDP';
 
@@ -18,6 +19,7 @@ const legacyMockKeys = [
 
 if (typeof window !== 'undefined') {
     legacyMockKeys.forEach((key) => window.localStorage.removeItem(key));
+    installModalEnterSubmit();
 }
 
 createInertiaApp({

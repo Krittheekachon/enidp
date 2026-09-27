@@ -320,6 +320,68 @@ class AssessmentReviewerChainTest extends TestCase
         ]);
     }
 
+    public function test_final_approval_creates_missing_gap_with_expected_and_actual_levels(): void
+    {
+        $thirdReviewer = User::factory()->create([
+            'role_id' => $this->roleId('dean'),
+        ]);
+        [$positionId, $levelId, $competencyId] = $this->positionLevelAndCompetencyForGap('CC-FINAL-GAP');
+        $employee = User::factory()->create([
+            'role_id' => $this->roleId('employee'),
+            'workline' => 'Test Workline',
+            'position' => 'Test Position',
+            'position_id' => $positionId,
+            'level' => 'Test Level',
+            'level_id' => $levelId,
+        ]);
+        $this->assignAssessmentReviewers($employee, [
+            3 => $thirdReviewer->id,
+        ]);
+        $assessment = Assessment::create([
+            'user_id' => $employee->id,
+            'competency_id' => $competencyId,
+            'assessment_round_id' => $this->assessmentRoundId(),
+            'score' => 2,
+            'note' => '',
+            'status' => 'dept_evaluated',
+        ]);
+
+        $this->assertDatabaseMissing('competency_gaps', [
+            'assessment_id' => $assessment->id,
+            'competency_id' => $competencyId,
+        ]);
+
+        $this->actingAs($thirdReviewer)
+            ->post(route('assessments.approve'), [
+                'user_id' => $employee->id,
+                'competency_id' => $competencyId,
+            ])
+            ->assertSessionHasNoErrors();
+
+        $gap = DB::table('competency_gaps')
+            ->where('assessment_id', $assessment->id)
+            ->where('competency_id', $competencyId)
+            ->first();
+
+        $this->assertNotNull($gap);
+        $this->assertSame('approved', $gap->status);
+        $this->assertEquals(3, $gap->expected_level);
+        $this->assertEquals(2, $gap->actual_level);
+        $this->assertEquals(-1, $gap->gap);
+        $this->assertTrue((bool) $gap->requires_idp);
+
+        $this->actingAs($employee)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('currentUserCompetencyGaps.0.competencyId', $competencyId)
+                ->where('currentUserCompetencyGaps.0.expected', 3)
+                ->where('currentUserCompetencyGaps.0.actual', 2)
+                ->where('currentUserCompetencyGaps.0.gap', -1)
+                ->where('currentUserCompetencyGaps.0.status', 'approved')
+            );
+    }
+
     public function test_dynamic_reviewer_chain_can_continue_past_three_steps(): void
     {
         $reviewers = collect(range(1, 4))
@@ -644,6 +706,45 @@ class AssessmentReviewerChainTest extends TestCase
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    private function positionLevelAndCompetencyForGap(string $code): array
+    {
+        $worklineId = DB::table('worklines')->insertGetId([
+            'name' => 'Test Workline',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $jobFamilyId = DB::table('job_families')->insertGetId([
+            'workline_id' => $worklineId,
+            'name' => 'Test Family',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $positionId = DB::table('positions')->insertGetId([
+            'job_family_id' => $jobFamilyId,
+            'name' => 'Test Position',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $levelId = DB::table('levels')->insertGetId([
+            'workline_id' => $worklineId,
+            'name' => 'Test Level',
+            'expected_level' => 3,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $competencyId = $this->competencyId($code);
+
+        DB::table('position_competencies')->insert([
+            'assessment_round_id' => $this->assessmentRoundId(),
+            'position_id' => $positionId,
+            'competency_id' => $competencyId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        return [$positionId, $levelId, $competencyId];
     }
 
     private function roleId(string $key): int

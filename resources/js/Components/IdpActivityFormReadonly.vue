@@ -359,22 +359,22 @@ textarea { min-height: 80px; resize: none; line-height: 1.55; }
 .coaching-approach-field { display: grid; gap: 12px; border: 1px solid #dce9e5; border-radius: 9px; background: #f8fcfb; padding: 12px; }
 .coaching-approach-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #344054; font-size: 14px; font-weight: 900; }
 .coaching-approach-label > div { display: grid; gap: 2px; }
-.coaching-approach-label small { color: #7a8798; font-size: 12px; font-weight: 700; }
+.coaching-approach-label small { color: var(--color-text-muted); font-size: 12px; font-weight: 700; }
 .coaching-approach-label > button { border: 1px solid #9fd0c4; border-radius: 999px; background: #fff; color: #1d6b59; padding: 6px 11px; font-size: 12px; font-weight: 900; opacity: 1; }
 .coaching-approach-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .coaching-approach-option { position: relative; display: flex; align-items: center; gap: 9px; min-height: 48px; border: 1px solid #ccd8e0; border-radius: 8px; background: #fff; color: #4b5565; padding: 9px 30px 9px 10px; }
 .coaching-approach-option strong { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #edf1f5; color: #344054; }
 .coaching-approach-option span { font-size: 13px; font-weight: 900; }
-.coaching-approach-option i { position: absolute; right: 10px; display: none; color: #247260; font-style: normal; font-weight: 900; }
+.coaching-approach-option i { position: absolute; right: 10px; display: none; color: var(--color-primary); font-style: normal; font-weight: 900; }
 .coaching-approach-option.selected { border-color: #72b9a7; background: #edf8f4; color: #185f50; }
-.coaching-approach-option.selected strong { background: #247260; color: #fff; }
+.coaching-approach-option.selected strong { background: var(--color-primary); color: #fff; }
 .coaching-approach-option.selected i { display: block; }
 .coaching-timeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 1px solid #d8e2e8; border-radius: 9px; background: #fff; padding: 12px; }
 .coaching-timeline.coaching-timeline-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .coaching-timeline.group-activity-timeline, .coaching-timeline.training-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .coaching-timeline-heading { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e8edf1; padding: 0 2px 10px; }
 .coaching-timeline-heading strong { color: #344054; font-size: 14px; }
-.coaching-timeline-heading span { color: #7a8798; font-size: 12px; font-weight: 700; }
+.coaching-timeline-heading span { color: var(--color-text-muted); font-size: 12px; font-weight: 700; }
 .catalog-snapshot-note { color: #667085; font-size: 13px; font-weight: 800; }
 .training-catalog-summary { display: grid; gap: 12px; border: 1px solid #d8e3ef; border-radius: 9px; background: #f8fafc; padding: 14px; }
 .training-course-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
@@ -385,20 +385,20 @@ textarea { min-height: 80px; resize: none; line-height: 1.55; }
 .training-catalog-summary > p { min-width: 0; margin: 0; color: #475467; font-size: 14px; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
 .training-catalog-summary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin: 0; border: 1px solid #e1e8f0; border-radius: 8px; background: #e1e8f0; }
 .training-catalog-summary dl > div { display: grid; gap: 3px; background: #fff; padding: 10px 12px; }
-.training-catalog-summary dt { color: #7a8798; font-size: 12px; font-weight: 800; }
+.training-catalog-summary dt { color: var(--color-text-muted); font-size: 12px; font-weight: 800; }
 .training-catalog-summary dd { margin: 0; color: #273142; font-size: 14px; font-weight: 900; }
 .timeline-block { overflow: hidden; border: 1px solid #d8e2e8; border-radius: 9px; background: #fff; }
 .timeline-block > header { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e8edf1; padding: 10px 12px; }
 .timeline-block > header strong { color: #344054; font-size: 14px; }
-.timeline-block > header span { color: #7a8798; font-size: 12px; }
+.timeline-block > header span { color: var(--color-text-muted); font-size: 12px; }
 .timeline-block > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; padding: 12px; }
 .choice-block { display: grid; gap: 8px; color: #475467; font-size: 13px; font-weight: 900; }
 .choice-block > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .choice-block label { display: flex; align-items: center; gap: 8px; min-width: 74px; border: 1px solid #d8e0e9; border-radius: 7px; background: #fff; padding: 8px 10px; }
 .choice-block i { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid #b8c7d9; border-radius: 5px; color: #fff; font-style: normal; }
 .choice-block label.selected { border-color: #72b9a7; background: #edf8f4; color: #185f50; }
-.choice-block label.selected i { border-color: #247260; background: #247260; }
-.empty { margin: 14px; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 22px; color: #718096; text-align: center; }
+.choice-block label.selected i { border-color: var(--color-primary); background: var(--color-primary); }
+.empty { margin: 14px; border: 1px dashed var(--color-border); border-radius: 8px; padding: 22px; color: var(--color-text-muted); text-align: center; }
 @media (max-width: 900px) {
   .readonly-form { padding: 12px; }
   .form-grid, .form-grid.three, .project-assignment-grid, .project-assignment-grid.training-form-grid, .coaching-approach-options, .coaching-timeline, .coaching-timeline.coaching-timeline-four, .coaching-timeline.group-activity-timeline, .coaching-timeline.training-summary { grid-template-columns: 1fr; }

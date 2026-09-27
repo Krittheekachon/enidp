@@ -35,6 +35,130 @@ class AdminStructureControllerTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_create_global_support_position_for_workline(): void
+    {
+        $admin = User::factory()->create([
+            'role_id' => (int) DB::table('roles')->where('key', 'admin')->value('id'),
+        ]);
+        $worklineId = DB::table('worklines')->insertGetId(['name' => 'สายสนับสนุน', 'created_at' => now(), 'updated_at' => now()]);
+        $jobFamilyId = DB::table('job_families')->insertGetId(['workline_id' => $worklineId, 'name' => 'ตำแหน่งสายสนับสนุน', 'created_at' => now(), 'updated_at' => now()]);
+        $departmentId = DB::table('support_departments')->insertGetId(['name' => 'ฝ่ายบริหาร', 'created_at' => now(), 'updated_at' => now()]);
+        $workId = DB::table('support_works')->insertGetId(['support_department_id' => $departmentId, 'name' => 'งานบุคคล', 'created_at' => now(), 'updated_at' => now()]);
+        $unitId = DB::table('support_units')->insertGetId(['support_work_id' => $workId, 'name' => 'หน่วยพัฒนา', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('positions')->insert([
+            'job_family_id' => $jobFamilyId,
+            'support_unit_id' => $unitId,
+            'name' => 'นักทรัพยากรบุคคล',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->actingAs($admin)->post(route('admin.structure.positions.store'), [
+            'workline_name' => 'สายสนับสนุน',
+            'job_family_name' => 'ตำแหน่งสายสนับสนุน',
+            'name' => 'นักทรัพยากรบุคคล',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('positions', [
+            'job_family_id' => $jobFamilyId,
+            'support_unit_id' => null,
+            'name' => 'นักทรัพยากรบุคคล',
+        ]);
+        $this->assertSame(2, DB::table('positions')->where('name', 'นักทรัพยากรบุคคล')->count());
+    }
+
+    public function test_support_position_name_can_repeat_in_different_units_but_not_the_same_unit(): void
+    {
+        $admin = User::factory()->create([
+            'role_id' => (int) DB::table('roles')->where('key', 'admin')->value('id'),
+        ]);
+        $worklineId = DB::table('worklines')->insertGetId([
+            'name' => 'สายสนับสนุน',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('job_families')->insert([
+            'workline_id' => $worklineId,
+            'name' => 'ตำแหน่งสายสนับสนุน',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $departmentId = DB::table('support_departments')->insertGetId([
+            'name' => 'ฝ่ายบริหาร',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $workId = DB::table('support_works')->insertGetId([
+            'support_department_id' => $departmentId,
+            'name' => 'งานเทคโนโลยี',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        foreach (['หน่วยระบบ', 'หน่วยบริการ'] as $unitName) {
+            DB::table('support_units')->insert([
+                'support_work_id' => $workId,
+                'name' => $unitName,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $this->actingAs($admin)
+                ->post(route('admin.structure.positions.store'), [
+                    'division_name' => 'ฝ่ายบริหาร',
+                    'work_name' => 'งานเทคโนโลยี',
+                    'unit_name' => $unitName,
+                    'name' => 'เจ้าหน้าที่ระบบงานคอมพิวเตอร์',
+                ])
+                ->assertRedirect()
+                ->assertSessionHasNoErrors();
+        }
+
+        $systemUnitId = (int) DB::table('support_units')->where('name', 'หน่วยระบบ')->value('id');
+        $serviceUnitId = (int) DB::table('support_units')->where('name', 'หน่วยบริการ')->value('id');
+        $systemPositionId = (int) DB::table('positions')->where('support_unit_id', $systemUnitId)->value('id');
+        $servicePositionId = (int) DB::table('positions')->where('support_unit_id', $serviceUnitId)->value('id');
+        $systemUser = User::factory()->create([
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายบริหาร > งานเทคโนโลยี > หน่วยระบบ',
+            'position' => 'เจ้าหน้าที่ระบบงานคอมพิวเตอร์',
+            'position_id' => $systemPositionId,
+        ]);
+        $serviceUser = User::factory()->create([
+            'workline' => 'สายสนับสนุน',
+            'department' => 'ฝ่ายบริหาร > งานเทคโนโลยี > หน่วยบริการ',
+            'position' => 'เจ้าหน้าที่ระบบงานคอมพิวเตอร์',
+            'position_id' => $servicePositionId,
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('admin.structure.positions.update'), [
+                'division_name' => 'ฝ่ายบริหาร',
+                'work_name' => 'งานเทคโนโลยี',
+                'unit_name' => 'หน่วยระบบ',
+                'old_name' => 'เจ้าหน้าที่ระบบงานคอมพิวเตอร์',
+                'name' => 'เจ้าหน้าที่ระบบอาวุโส',
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame('เจ้าหน้าที่ระบบอาวุโส', $systemUser->refresh()->position);
+        $this->assertSame('เจ้าหน้าที่ระบบงานคอมพิวเตอร์', $serviceUser->refresh()->position);
+
+        $this->actingAs($admin)
+            ->post(route('admin.structure.positions.store'), [
+                'division_name' => 'ฝ่ายบริหาร',
+                'work_name' => 'งานเทคโนโลยี',
+                'unit_name' => 'หน่วยระบบ',
+                'name' => 'เจ้าหน้าที่ระบบอาวุโส',
+            ])
+            ->assertRedirect()
+            ->assertSessionHasErrors(['name']);
+
+        $this->assertSame(1, DB::table('positions')->where('name', 'เจ้าหน้าที่ระบบอาวุโส')->count());
+        $this->assertSame(1, DB::table('positions')->where('name', 'เจ้าหน้าที่ระบบงานคอมพิวเตอร์')->count());
+    }
+
     public function test_admin_can_create_update_and_delete_workline(): void
     {
         $admin = User::factory()->create([

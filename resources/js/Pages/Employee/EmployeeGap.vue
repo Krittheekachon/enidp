@@ -598,7 +598,7 @@ const formatGap = (value: unknown) => {
   font-size: 11px;
   font-weight: 900;
 }
-.indicator-list > div.selected > span { border-color: #c7432b; background: #c7432b; }
+.indicator-list > div.selected > span { border-color: var(--color-primary); background: var(--color-primary); }
 .indicator-list p { margin: 0; font-size: 12px; line-height: 1.6; }
 .indicator-list p strong { display: inline-block; margin-right: 8px; color: inherit; }
 .comment-list { display: grid; gap: 8px; }

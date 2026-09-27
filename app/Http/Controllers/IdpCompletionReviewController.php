@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Services\IdpItemReviewWorkflow;
+use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +15,7 @@ class IdpCompletionReviewController extends Controller
 {
     public function __construct(
         private readonly IdpItemReviewWorkflow $reviewWorkflow,
+        private readonly NotificationService $notifications,
     ) {}
 
     public function approve(Request $request): RedirectResponse
@@ -33,7 +36,8 @@ class IdpCompletionReviewController extends Controller
             throw ValidationException::withMessages(['achievementNote' => 'กรุณาระบุสิ่งที่ควรพัฒนาต่อ']);
         }
 
-        DB::transaction(function () use ($data): void {
+        $approvedCompletion = null;
+        DB::transaction(function () use ($data, &$approvedCompletion): void {
             $completion = $this->reviewableCompletion($data['completionPublicId']);
             $step = (int) $completion->current_review_step;
             $now = now();
@@ -68,7 +72,21 @@ class IdpCompletionReviewController extends Controller
                 ]);
                 $this->reviewWorkflow->syncParentStatus((int) $completion->idp_id);
             }
+
+            $approvedCompletion = $completion;
         });
+
+        if ($approvedCompletion) {
+            $employee = User::find((int) $approvedCompletion->user_id);
+            if ($employee) {
+                $this->notifications->notifyEmployeeIdpProgressApproved(
+                    $employee,
+                    (int) $approvedCompletion->idp_item_id,
+                    $data['achievementStatus'],
+                    trim($data['comment'] ?? ''),
+                );
+            }
+        }
 
         return back()->with('success', 'อนุมัติผลการพัฒนาสมรรถนะแล้ว');
     }
@@ -84,7 +102,8 @@ class IdpCompletionReviewController extends Controller
             'achievementNote' => ['nullable', 'string', 'max:5000'],
         ], ['comment.required' => 'กรุณาระบุเหตุผลที่ส่งกลับ']);
 
-        DB::transaction(function () use ($data): void {
+        $returnedCompletion = null;
+        DB::transaction(function () use ($data, &$returnedCompletion): void {
             $completion = $this->reviewableCompletion($data['completionPublicId']);
             $now = now();
             $this->recordDecision($completion, (int) $completion->current_review_step, 'rejected', $data, $now);
@@ -94,7 +113,20 @@ class IdpCompletionReviewController extends Controller
                 'current_review_step' => null,
                 'updated_at' => $now,
             ]);
+
+            $returnedCompletion = $completion;
         });
+
+        if ($returnedCompletion) {
+            $employee = User::find((int) $returnedCompletion->user_id);
+            if ($employee) {
+                $this->notifications->notifyEmployeeIdpProgressReturned(
+                    $employee,
+                    (int) $returnedCompletion->idp_item_id,
+                    trim($data['comment']),
+                );
+            }
+        }
 
         return back()->with('success', 'ส่งผลการพัฒนากลับให้แก้ไขแล้ว');
     }

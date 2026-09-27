@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
 import {
   formDefinitions,
@@ -97,8 +97,10 @@ const activityBuilderFocus = ref<BuilderFocus>('experiential');
 const replacementActivityKey = ref<string | null>(null);
 const showCoachingApproachHelp = ref(false);
 const saveState = ref<'idle' | 'saving' | 'saved' | 'error'>('idle');
+const submitError = ref('');
 const lastSavedSignature = ref('');
 const queuedSave = ref(false);
+const forceQueuedSave = ref(false);
 let activitySequence = 0;
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -530,6 +532,7 @@ const normalizeFormDetails = (formCode: string, details?: FormDetails): FormDeta
   };
 };
 const openActivityForm = (activity: Activity) => {
+  clearAutoSaveTimer();
   if (!selectedPlanLocked.value) {
     if (!activity.formCode) {
       activity.formCode = effectiveFormCode(activity);
@@ -539,9 +542,12 @@ const openActivityForm = (activity: Activity) => {
   showCoachingApproachHelp.value = false;
   activeFormActivityKey.value = activity.clientKey;
 };
-const closeActivityForm = () => {
+const closeActivityForm = (resumeAutoSave = true) => {
   showCoachingApproachHelp.value = false;
   activeFormActivityKey.value = null;
+  if (resumeAutoSave) {
+    void nextTick(() => scheduleAutoSave());
+  }
 };
 const activeFormActivity = computed(() =>
   selectedPlan.value?.activities.find((activity) => activity.clientKey === activeFormActivityKey.value) || null);
@@ -635,7 +641,9 @@ const saveActivityForm = () => {
       _saved: true,
     };
   }
-  closeActivityForm();
+  submitError.value = '';
+  closeActivityForm(false);
+  void performAutoSave(true);
 };
 const addFormRow = (activity: Activity) => {
   if (hasLockedFormRows(activity)) return;
@@ -674,19 +682,51 @@ const signature = () => JSON.stringify(requestPayload());
 
 watch(() => [props.gaps, props.idp], hydratePlans, { immediate: true });
 watch(selectedGapId, () => {
+  submitError.value = '';
   closeActivityBuilder();
 });
 
 const csrfToken = () => document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content || '';
+const firstValidationMessage = (errorBag: unknown, fallback: string) => {
+  if (!errorBag || typeof errorBag !== 'object') return fallback;
+  const first = Object.values(errorBag as Record<string, unknown>)[0];
+  if (Array.isArray(first)) return String(first[0] || fallback);
+  return first ? String(first) : fallback;
+};
 
-const performAutoSave = async () => {
+const clearAutoSaveTimer = () => {
+  if (autoSaveTimer === null) return;
+  window.clearTimeout(autoSaveTimer);
+  autoSaveTimer = null;
+};
+
+const scheduleAutoSave = (delay = 1000, force = false) => {
+  clearAutoSaveTimer();
+  autoSaveTimer = window.setTimeout(() => {
+    autoSaveTimer = null;
+    void performAutoSave(force);
+  }, delay);
+};
+
+const performAutoSave = async (force = false): Promise<boolean> => {
+  if (!force && (activeFormActivityKey.value !== null
+    || (selectedPlan.value && !selectedPlanLocked.value && !planIssue(selectedPlan.value)))) {
+    queuedSave.value = false;
+    return false;
+  }
   if (plans.value.every((plan) => isPlanLocked(plan)) || saveState.value === 'saving') {
     queuedSave.value = saveState.value === 'saving';
-    return;
+    forceQueuedSave.value = forceQueuedSave.value || (saveState.value === 'saving' && force);
+    return false;
   }
   const nextSignature = signature();
-  if (nextSignature === lastSavedSignature.value) return;
+  if (nextSignature === lastSavedSignature.value) {
+    queuedSave.value = false;
+    forceQueuedSave.value = false;
+    return true;
+  }
 
+  let saved = false;
   saveState.value = 'saving';
   try {
     const response = await fetch(route('employee.idp.draft'), {
@@ -701,27 +741,45 @@ const performAutoSave = async () => {
     });
 
     if (!response.ok) {
-      throw new Error(`Auto-save failed with status ${response.status}`);
+      const body = await response.json().catch(() => null);
+      throw new Error(firstValidationMessage(body?.errors, 'บันทึกข้อมูลแผนไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง'));
     }
 
     lastSavedSignature.value = nextSignature;
+    submitError.value = '';
     saveState.value = 'saved';
-  } catch {
+    saved = true;
+  } catch (error) {
+    submitError.value = error instanceof Error
+      ? error.message
+      : 'บันทึกข้อมูลแผนไม่สำเร็จ กรุณาลองอีกครั้ง';
     saveState.value = 'error';
   } finally {
-    if (queuedSave.value || signature() !== lastSavedSignature.value) {
-      queuedSave.value = false;
-      window.setTimeout(performAutoSave, 250);
+    const retryWithForce = forceQueuedSave.value;
+    const shouldRetry = retryWithForce || (
+      !(selectedPlan.value && !selectedPlanLocked.value && !planIssue(selectedPlan.value))
+      && (queuedSave.value || signature() !== lastSavedSignature.value)
+    );
+    queuedSave.value = false;
+    forceQueuedSave.value = false;
+    if (shouldRetry) {
+      scheduleAutoSave(250, retryWithForce);
     }
   }
+
+  return saved;
 };
 
 watch(plans, () => {
-  if (plans.value.every((plan) => isPlanLocked(plan)) || signature() === lastSavedSignature.value) return;
+  if (activeFormActivityKey.value !== null
+    || plans.value.every((plan) => isPlanLocked(plan))
+    || (selectedPlan.value && !selectedPlanLocked.value && !planIssue(selectedPlan.value))
+    || signature() === lastSavedSignature.value) return;
   saveState.value = 'idle';
-  if (autoSaveTimer) window.clearTimeout(autoSaveTimer);
-  autoSaveTimer = window.setTimeout(performAutoSave, 1000);
+  scheduleAutoSave();
 }, { deep: true });
+
+onBeforeUnmount(clearAutoSaveTimer);
 
 const planIssue = (plan: Plan): string => {
   if (!plan.goal.trim()) return 'ยังไม่ได้ระบุเป้าหมาย';
@@ -894,14 +952,18 @@ const planNavDetail = (plan: Plan) => {
 const selectedPlanIssue = computed(() => selectedPlan.value && !selectedPlanLocked.value
   ? planIssue(selectedPlan.value)
   : '');
-const submitSelectedPlan = () => {
+const submitSelectedPlan = async () => {
   if (!selectedPlan.value || selectedPlanLocked.value) return;
   const issue = planIssue(selectedPlan.value);
   if (issue) {
     window.alert(issue);
     return;
   }
-  if (autoSaveTimer) window.clearTimeout(autoSaveTimer);
+  clearAutoSaveTimer();
+  submitError.value = '';
+  const draftSaved = await performAutoSave(true);
+  if (!draftSaved) return;
+
   saveState.value = 'saving';
   router.post(route('employee.idp.submit-item'), {
     competencyGapId: selectedPlan.value.competencyGapId,
@@ -916,7 +978,11 @@ const submitSelectedPlan = () => {
     },
   }, {
     preserveScroll: true,
-    onError: () => { saveState.value = 'error'; },
+    onError: (errorBag) => {
+      submitError.value = firstValidationMessage(errorBag, 'ส่งแผนให้หัวหน้าไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง');
+      saveState.value = 'error';
+    },
+    onSuccess: () => { submitError.value = ''; },
     onFinish: () => { saveState.value = 'idle'; },
   });
 };
@@ -1234,7 +1300,7 @@ const submitSelectedPlan = () => {
           <div>
             <strong>{{ selectedPlanLocked ? 'ดูรายละเอียดฟอร์มกิจกรรม (อ่านอย่างเดียว)' : 'กรอกรายละเอียดฟอร์มกิจกรรม' }}</strong>
           </div>
-          <button type="button" @click="closeActivityForm">×</button>
+          <button type="button" @click="closeActivityForm()">×</button>
         </header>
 
         <fieldset class="form-paper" :disabled="selectedPlanLocked" aria-label="รายละเอียดฟอร์มกิจกรรม">
@@ -1757,7 +1823,7 @@ const submitSelectedPlan = () => {
         </fieldset>
 
         <footer class="form-modal-footer">
-          <button type="button" @click="closeActivityForm">{{ selectedPlanLocked ? 'ปิด' : 'ยกเลิก' }}</button>
+          <button type="button" @click="closeActivityForm()">{{ selectedPlanLocked ? 'ปิด' : 'ยกเลิก' }}</button>
           <span v-if="!selectedPlanLocked && activeFormUserIssue" class="form-save-error" role="status">{{ activeFormUserIssue }}</span>
           <button v-if="!selectedPlanLocked" type="button" class="primary" :disabled="!!activeFormUserIssue" @click="saveActivityForm">บันทึกฟอร์ม</button>
         </footer>
@@ -1806,15 +1872,20 @@ const submitSelectedPlan = () => {
     <footer v-if="hasIdpReviewerSteps && idpGaps.length" class="submit-bar">
       <div>
         <strong>{{ selectedPlan ? `${selectedGap?.cd} · ${planStatusLabel(selectedPlan)}` : 'เลือกสมรรถนะ' }}</strong>
-        <span v-if="selectedPlanIssue" id="idp-submit-reason" class="submit-reason" role="status">
+        <span v-if="submitError" id="idp-submit-reason" class="submit-reason" role="alert">
+          {{ submitError }}
+        </span>
+        <span v-else-if="selectedPlanIssue" id="idp-submit-reason" class="submit-reason" role="status">
           ยังส่งไม่ได้: {{ selectedPlanIssue }}
         </span>
         <span v-else-if="saveState === 'saving'" id="idp-submit-reason" role="status">กำลังบันทึกข้อมูล กรุณารอสักครู่</span>
         <span v-else-if="selectedPlan && !selectedPlanLocked" class="submit-ready" role="status">ข้อมูลครบแล้ว พร้อมส่งอนุมัติ</span>
         <span v-if="selectedPlan?.status === 'revision_required'">เมื่อส่งใหม่ ระบบจะเริ่มตรวจจากผู้อนุมัติลำดับแรกอีกครั้ง</span>
-        <span v-else>{{ selectedPlanLocked ? 'สมรรถนะอื่นยังสามารถจัดทำและส่งแยกได้' : 'ข้อมูลร่างจะบันทึกอัตโนมัติหลังหยุดกรอก' }}</span>
+        <span v-else-if="selectedPlanLocked">สมรรถนะอื่นยังสามารถจัดทำและส่งแยกได้</span>
+        <span v-else-if="selectedPlanIssue">ข้อมูลร่างจะบันทึกอัตโนมัติหลังหยุดกรอก</span>
+        <span v-else>บันทึกฟอร์มล่าสุดแล้ว และหยุดบันทึกอัตโนมัติ</span>
       </div>
-      <button type="button" :aria-describedby="selectedPlanIssue || saveState === 'saving' ? 'idp-submit-reason' : undefined" :disabled="!selectedPlan || selectedPlanLocked || saveState === 'saving' || !!selectedPlanIssue" @click="submitSelectedPlan">
+      <button type="button" :aria-describedby="submitError || selectedPlanIssue || saveState === 'saving' ? 'idp-submit-reason' : undefined" :disabled="!selectedPlan || selectedPlanLocked || saveState === 'saving' || !!selectedPlanIssue" @click="submitSelectedPlan">
         {{ selectedPlanLocked ? planStatusLabel(selectedPlan) : 'ส่งสมรรถนะนี้ให้หัวหน้า' }}
       </button>
     </footer>
@@ -1826,16 +1897,16 @@ const submitSelectedPlan = () => {
 .plan-review-route { margin-top: 14px; border: 1px solid #d2dfda; border-radius: 8px; background: #fff; overflow: hidden; }
 .plan-review-route > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e4ebe7; }
 .plan-review-route h3 { margin: 0; font-size: 14px; color: #245d4e; }
-.plan-review-route p { margin: 4px 0 0; font-size: 11px; color: #718096; }
+.plan-review-route p { margin: 4px 0 0; font-size: 11px; color: var(--color-text-muted); }
 .plan-review-route ol { display: flex; gap: 12px; list-style: none; margin: 0; padding: 16px; overflow-x: auto; }
 .plan-review-route li { display: flex; align-items: flex-start; gap: 10px; flex: 1 0 190px; padding: 12px; border-top: 3px solid #dce5e1; background: #f8faf9; }
-.plan-review-route li.current { border-color: #247260; background: #eaf5f0; }
+.plan-review-route li.current { border-color: var(--color-primary); background: var(--color-primary-soft); }
 .plan-review-route li > b { display: grid; place-items: center; flex: 0 0 28px; height: 28px; border-radius: 50%; background: #e2e9e5; color: #60746c; font-size: 12px; }
-.plan-review-route li.current > b { background: #247260; color: #fff; }
+.plan-review-route li.current > b { background: var(--color-primary); color: #fff; }
 .plan-review-route li strong, .plan-review-route li small, .plan-review-route li em { display: block; }
 .plan-review-route li strong { font-size: 12px; }
-.plan-review-route li small { margin-top: 3px; color: #718096; font-size: 10px; }
-.plan-review-route li em { margin-top: 7px; color: #247260; font-size: 10px; font-style: normal; font-weight: 900; }
+.plan-review-route li small { margin-top: 3px; color: var(--color-text-muted); font-size: 10px; }
+.plan-review-route li em { margin-top: 7px; color: var(--color-primary); font-size: 10px; font-style: normal; font-weight: 900; }
 .plan-review-route > footer { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 11px 16px; border-top: 1px solid #eee0c9; background: #fffaf0; color: #785b2c; font-size: 12px; line-height: 1.6; }
 .plan-review-route > footer strong { color: #80591f; font-weight: 800; }
 @media (max-width: 900px) { .plan-review-route > header { align-items: flex-start; flex-direction: column; } .plan-review-route ol { flex-direction: column; } .plan-review-route li { flex-basis: auto; } }
@@ -1847,13 +1918,13 @@ const submitSelectedPlan = () => {
 .idp-readiness-panel > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 15px; border-bottom: 1px solid #e2e6eb; padding: 20px 22px; }
 .idp-readiness-panel h2, .idp-readiness-panel p { margin: 0; }
 .idp-readiness-panel h2 { color: #172033; font-size: 18px; }
-.idp-readiness-panel p { margin-top: 5px; color: #7a8798; font-size: 12px; }
+.idp-readiness-panel p { margin-top: 5px; color: var(--color-text-muted); font-size: 12px; }
 .idp-readiness-panel header small { display: block; margin-bottom: 4px; color: #3979b7; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
 .idp-readiness-symbol, .idp-readiness-state { display: grid; place-items: center; border-radius: 50%; background: #f7ded7; color: #a63824; font-weight: 900; }
 .idp-readiness-symbol { width: 38px; height: 38px; font-size: 17px; }
 .idp-readiness-count { display: grid; min-width: 88px; border: 1px solid #e0e4e9; border-radius: 8px; background: #f3f5f7; padding: 9px 12px; text-align: center; }
 .idp-readiness-count strong { color: #172033; font-size: 18px; }
-.idp-readiness-count span { color: #7a8798; font-size: 9px; font-weight: 800; }
+.idp-readiness-count span { color: var(--color-text-muted); font-size: 9px; font-weight: 800; }
 .idp-readiness-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 12px; margin: 0 22px; padding: 15px 0; }
 .idp-readiness-state { width: 26px; height: 26px; font-size: 11px; }
 .idp-readiness-row > div { display: grid; gap: 3px; }
@@ -1862,21 +1933,21 @@ const submitSelectedPlan = () => {
 .idp-readiness-owner { border-radius: 999px; background: #fff0eb; color: #a63824; padding: 5px 9px; font-size: 10px; font-weight: 900; }
 .idp-readiness-panel > footer { display: grid; gap: 3px; border-top: 1px solid #e2e6eb; background: #f3f5f7; padding: 13px 22px; }
 .idp-readiness-panel > footer strong { color: #172033; font-size: 11px; }
-.idp-readiness-panel > footer span { color: #7a8798; font-size: 10px; line-height: 1.5; }
+.idp-readiness-panel > footer span { color: var(--color-text-muted); font-size: 10px; line-height: 1.5; }
 .workspace { min-height: 620px; border: 1px solid #ccd5df; border-radius: 8px; background: #eef2f5; overflow: hidden; }
 .plan-nav { border-bottom: 1px solid #cfd8e2; background: #f7f9fb; }
 .plan-nav-meta { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #d8e0e8; background: #fff; }
 .person { display: grid; gap: 3px; min-width: 220px; padding: 13px 17px; }
-.person span, .person small { color: #718096; font-size: 11px; }
+.person span, .person small { color: var(--color-text-muted); font-size: 11px; }
 .person strong { font-size: 14px; }
 .nav-heading { display: flex; align-items: center; gap: 9px; padding: 13px 17px; font-size: 14px; }
 .nav-heading span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #dfe8e5; color: #216b59; font-weight: 900; }
 .plan-nav-scroll { display: flex; gap: 10px; overflow-x: auto; padding: 12px 16px 14px; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #a9bbb5 transparent; }
 .plan-nav-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; flex: 0 0 280px; min-height: 108px; border: 1px solid #dce3e9; border-top: 3px solid #dce3e9; border-radius: 7px; background: #fff; padding: 12px 13px; text-align: left; cursor: pointer; }
 .plan-nav-item:hover { border-color: #9cbfb3; background: #f5faf8; }
-.plan-nav-item.active { border-color: #9cbfb3; border-top-color: #247260; background: #eaf5f0; }
-.plan-nav-item:focus-visible { outline: 2px solid #247260; outline-offset: 2px; }
-.competency-code { min-width: 51px; color: #247260; font-size: 11px; font-weight: 900; }
+.plan-nav-item.active { border-color: var(--color-primary-border); border-top-color: var(--color-primary); background: var(--color-primary-soft); }
+.plan-nav-item:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+.competency-code { min-width: 51px; color: var(--color-primary); font-size: 11px; font-weight: 900; }
 .competency-copy { min-width: 0; grid-column: 1 / -1; grid-row: 2; }
 .competency-copy strong, .competency-copy small { display: block; white-space: normal; overflow-wrap: anywhere; }
 .competency-copy strong { overflow: hidden; font-size: 14px; line-height: 1.55; color: #273142; text-overflow: ellipsis; white-space: nowrap; }
@@ -1888,7 +1959,7 @@ const submitSelectedPlan = () => {
 .plan-status-badge.is-returned { border-color: #f7b4a8; background: #fff0ed; color: #b42318; }
 .plan-status-badge.is-approved { border-color: #abefc6; background: #eaf7ef; color: #067647; }
 .plan-content { min-width: 0; padding: 20px; background: #eef2f5; }
-.select-prompt, .empty-state, .activities-empty { display: grid; place-items: center; align-content: center; gap: 7px; min-height: 260px; color: #7a8798; text-align: center; }
+.select-prompt, .empty-state, .activities-empty { display: grid; place-items: center; align-content: center; gap: 7px; min-height: 260px; color: var(--color-text-muted); text-align: center; }
 .select-prompt strong, .empty-state strong, .activities-empty strong { color: #344054; }
 .competency-header { display: flex; justify-content: space-between; gap: 18px; padding: 16px; border: 1px solid #cfd8e2; border-radius: 7px; background: #fff; box-shadow: 0 3px 12px rgba(26, 45, 59, .04); }
 .competency-header h2 { margin: 8px 0 0; font-size: 20px; }
@@ -1897,7 +1968,7 @@ const submitSelectedPlan = () => {
 .score-row { display: grid; grid-template-columns: repeat(3, 72px); gap: 7px; flex: 0 0 auto; }
 .score-row > div { padding: 9px; border: 1px solid #e0e6ed; border-radius: 6px; text-align: center; }
 .score-row span, .score-row strong { display: block; }
-.score-row span { color: #7a8798; font-size: 10px; }
+.score-row span { color: var(--color-text-muted); font-size: 10px; }
 .score-row strong { margin-top: 4px; font-size: 17px; }
 .score-row .negative { border-color: #fecaca; background: #fff7f7; color: #b42318; }
 .revision-alert { display: grid; gap: 4px; margin-top: 14px; padding: 11px 13px; border: 1px solid #efb8b8; border-radius: 7px; background: #fff5f5; color: #9f2520; }
@@ -1918,7 +1989,7 @@ const submitSelectedPlan = () => {
 .activities-section .section-number { background: #28745f; }
 .section-title h3, .section-title p { margin: 0; }
 .section-title h3 { font-size: 14px; }
-.section-title p { margin-top: 3px; color: #7a8798; font-size: 11px; }
+.section-title p { margin-top: 3px; color: var(--color-text-muted); font-size: 11px; }
 .section-badge { padding: 5px 8px; border: 1px solid currentColor; border-radius: 5px; background: rgba(255,255,255,.78); font-size: 10px; font-weight: 900; white-space: nowrap; }
 .behavior-section .section-badge { color: #a7531d; }
 .goal-section .section-badge { color: #3979b7; }
@@ -1944,8 +2015,8 @@ select {
   cursor: pointer;
 }
 textarea { resize: vertical; line-height: 1.5; }
-input:focus, select:focus, textarea:focus { outline: 2px solid #b9d8cf; border-color: #247260; }
-input:disabled, select:disabled, textarea:disabled { background: #f2f4f7; color: #7a8798; }
+input:focus, select:focus, textarea:focus { outline: 3px solid var(--color-focus); outline-offset: 1px; border-color: var(--color-focus); }
+input:disabled, select:disabled, textarea:disabled { background: var(--color-disabled-bg); color: var(--color-disabled-text); }
 select:disabled { cursor: not-allowed; }
 .goal-section label > span { color: #3970a6; }
 .goal-section textarea { border-color: #c8d8e8; background: #fbfdff; }
@@ -1957,12 +2028,12 @@ select:disabled { cursor: not-allowed; }
 .activity > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid #e2e7ed; background: #f7f9fa; }
 .activity-identity { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .activity-identity > div { min-width: 0; }
-.activity-number { display: grid !important; place-items: center; width: 28px; height: 28px; border-radius: 5px; background: #dceee8; color: #246b59 !important; font-size: 11px !important; flex: 0 0 auto; }
+.activity-number { display: grid !important; place-items: center; width: 28px; height: 28px; border-radius: 5px; background: var(--color-primary-soft); color: var(--color-primary) !important; font-size: 11px !important; flex: 0 0 auto; }
 .activity > header span, .activity > header strong { display: block; }
-.activity > header span { color: #247260; font-size: 10px; font-weight: 900; }
+.activity > header span { color: var(--color-primary); font-size: 10px; font-weight: 900; }
 .activity > header strong { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .activity-header-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
-.activity > header .change-tool { width: auto; height: 30px; border: 1px solid #a8cbbf; border-radius: 5px; background: #fff; padding: 0 10px; color: #246b59; font-size: 10px; font-weight: 900; cursor: pointer; }
+.activity > header .change-tool { width: auto; height: 30px; border: 1px solid var(--color-primary-border); border-radius: 5px; background: #fff; padding: 0 10px; color: var(--color-primary); font-size: 10px; font-weight: 900; cursor: pointer; }
 .activity > header .remove-activity { width: 30px; height: 30px; border: 1px solid #e3c5c8; border-radius: 5px; background: #fff; color: #b42318; font-size: 18px; cursor: pointer; }
 .activity-form { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 11px; padding: 13px; }
 .activity-form .wide { grid-column: 1 / -1; }
@@ -1975,7 +2046,7 @@ select:disabled { cursor: not-allowed; }
 .activity-detail-action strong { color: #172033; font-size: 12px; }
 .activity-detail-action span { margin-top: 4px; color: #9a4d00; font-size: 11px; font-weight: 900; }
 .activity-detail-action span.saved { color: #16835d; }
-.activity-detail-action button { border: 0; border-radius: 6px; background: #247260; padding: 9px 12px; color: #fff; font-size: 12px; font-weight: 900; cursor: pointer; white-space: nowrap; }
+.activity-detail-action button { border: 0; border-radius: 6px; background: var(--color-primary); padding: 9px 12px; color: #fff; font-size: 12px; font-weight: 900; cursor: pointer; white-space: nowrap; }
 .activity-detail-action button:disabled { background: #aab5c2; cursor: not-allowed; }
 .activity-builder { margin-top: 12px; overflow: hidden; border: 1px solid #a9cfc3; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgba(28, 78, 65, .08); }
 .activity-builder-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dbe9e4; background: #f3faf7; padding: 13px 14px; }
@@ -1987,7 +2058,7 @@ select:disabled { cursor: not-allowed; }
 .activity-builder-tabs button { position: relative; display: grid; gap: 2px; min-width: 0; border: 1px solid #dbe2ea; border-radius: 7px; background: #fff; padding: 10px 38px 10px 11px; color: #344054; text-align: left; cursor: pointer; }
 .activity-builder-tabs button.active { border-color: #28745f; background: #edf8f4; box-shadow: inset 0 0 0 1px #28745f; color: #175c4a; }
 .activity-builder-tabs span { font-size: 12px; font-weight: 900; }
-.activity-builder-tabs small { overflow: hidden; color: #7a8798; font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.activity-builder-tabs small { overflow: hidden; color: var(--color-text-muted); font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .activity-builder-tabs b { position: absolute; top: 50%; right: 10px; display: grid; place-items: center; min-width: 21px; height: 21px; border-radius: 999px; background: #edf1f5; color: #667085; font-size: 10px; transform: translateY(-50%); }
 .activity-builder-tabs button.active b { background: #28745f; color: #fff; }
 .activity-builder-list { display: grid; gap: 7px; padding: 12px; }
@@ -1995,13 +2066,13 @@ select:disabled { cursor: not-allowed; }
 .activity-choice:hover { border-color: #75ad9d; background: #f8fcfa; }
 .activity-choice.unavailable { opacity: .45; background: #f3f5f7; cursor: not-allowed; filter: grayscale(.35); }
 .activity-choice.unavailable:hover { border-color: #dce4eb; background: #f3f5f7; }
-.activity-choice-code { display: grid; place-items: center; min-height: 34px; border-radius: 6px; background: #e5f2ee; color: #246b59; font-size: 10px; font-weight: 900; }
+.activity-choice-code { display: grid; place-items: center; min-height: 34px; border-radius: 6px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 10px; font-weight: 900; }
 .activity-choice-code.formal { background: #eef4ff; color: #315f9f; }
 .activity-choice-copy { min-width: 0; }
 .activity-choice-copy strong, .activity-choice-copy small { display: block; }
 .activity-choice-copy strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.activity-choice-copy small { margin-top: 3px; color: #7a8798; font-size: 10px; font-weight: 700; }
-.activity-choice-add { border: 1px solid #9bc8bb; border-radius: 5px; padding: 6px 9px; color: #246b59; font-size: 10px; font-weight: 900; }
+.activity-choice-copy small { margin-top: 3px; color: var(--color-text-muted); font-size: 10px; font-weight: 700; }
+.activity-choice-add { border: 1px solid var(--color-primary-border); border-radius: 5px; padding: 6px 9px; color: var(--color-primary); font-size: 10px; font-weight: 900; }
 .activity-builder-empty { padding: 22px 14px; border: 1px dashed #cbd5df; border-radius: 7px; background: #f8fafc; color: #667085; font-size: 11px; font-weight: 800; text-align: center; }
 .activity-builder-empty strong, .activity-builder-empty span { display: block; }
 .activity-builder-empty span { margin-top: 5px; font-weight: 700; }
@@ -2026,11 +2097,11 @@ select:disabled { cursor: not-allowed; }
 .form-block > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #d8e0e9; background: #f8fafc; padding: 10px 12px; }
 .form-block > header h4 { margin: 0; font-size: 14px; }
 .form-block > header span { color: #667085; font-size: 11px; font-weight: 900; }
-.form-block > header button { border: 1px solid #98c9b7; border-radius: 6px; background: #edf8f4; color: #247260; padding: 7px 10px; font-size: 11px; font-weight: 900; cursor: pointer; }
+.form-block > header button { border: 1px solid var(--color-primary-border); border-radius: 6px; background: var(--color-primary-soft); color: var(--color-primary); padding: 7px 10px; font-size: 11px; font-weight: 900; cursor: pointer; }
 .readonly-block > header { background: #edf8f4; }
 .approval-route-list { display: flex; align-items: center; gap: 10px; overflow-x: auto; padding: 14px; }
 .approval-route-step { display: flex; align-items: center; gap: 10px; min-width: 220px; border: 1px solid #cfe3dc; border-radius: 8px; background: #f8fcfa; padding: 10px 12px; }
-.approval-route-step > span { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: #247260; color: #fff; font-size: 12px; font-weight: 900; }
+.approval-route-step > span { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: var(--color-primary); color: #fff; font-size: 12px; font-weight: 900; }
 .approval-route-step div, .approval-route-step strong, .approval-route-step small { display: block; min-width: 0; }
 .approval-route-step strong { overflow: hidden; color: #172033; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .approval-route-step small { margin-top: 3px; overflow: hidden; color: #667085; font-size: 10px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
@@ -2070,7 +2141,7 @@ select:disabled { cursor: not-allowed; }
 .training-catalog-summary > p { min-width: 0; margin: 0; color: #475467; font-size: 12px; line-height: 1.7; white-space: pre-line; overflow-wrap: anywhere; }
 .training-catalog-summary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin: 0; border: 1px solid #e1e8f0; border-radius: 8px; background: #e1e8f0; }
 .training-catalog-summary dl > div { display: grid; gap: 3px; background: #fff; padding: 10px 12px; }
-.training-catalog-summary dt { color: #7a8798; font-size: 10px; font-weight: 800; }
+.training-catalog-summary dt { color: var(--color-text-muted); font-size: 10px; font-weight: 800; }
 .training-catalog-summary dd { margin: 0; color: #273142; font-size: 12px; font-weight: 900; }
 .project-assignment-grid label { display: grid; gap: 6px; color: #475467; font-size: 11px; font-weight: 900; }
 .project-assignment-grid > .wide { grid-column: 1 / -1; }
@@ -2081,33 +2152,33 @@ select:disabled { cursor: not-allowed; }
 .coaching-approach-field { display: grid; gap: 12px; border: 1px solid #dce9e5; border-radius: 9px; background: #f8fcfb; padding: 12px; }
 .coaching-approach-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #344054; font-size: 12px; font-weight: 900; }
 .coaching-approach-label > div { display: grid; gap: 2px; }
-.coaching-approach-label small { color: #7a8798; font-size: 10px; font-weight: 700; }
+.coaching-approach-label small { color: var(--color-text-muted); font-size: 10px; font-weight: 700; }
 .coaching-approach-label button { border: 1px solid #9fd0c4; border-radius: 999px; background: #fff; color: #1d6b59; padding: 6px 11px; font-size: 10px; font-weight: 900; cursor: pointer; }
 .coaching-approach-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .coaching-approach-options button { position: relative; display: flex; align-items: center; gap: 9px; min-height: 48px; border: 1px solid #ccd8e0; border-radius: 8px; background: #fff; color: #4b5565; padding: 9px 30px 9px 10px; cursor: pointer; transition: border-color .15s ease, background .15s ease, box-shadow .15s ease; }
 .coaching-approach-options button:hover { border-color: #76bbaa; box-shadow: 0 3px 10px rgba(36, 114, 96, .08); }
 .coaching-approach-options button strong { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #edf1f5; color: #344054; }
 .coaching-approach-options button span { font-size: 11px; font-weight: 900; }
-.coaching-approach-options button i { position: absolute; right: 10px; display: none; color: #247260; font-style: normal; font-weight: 900; }
+.coaching-approach-options button i { position: absolute; right: 10px; display: none; color: var(--color-primary); font-style: normal; font-weight: 900; }
 .coaching-approach-options button.selected { border-color: #72b9a7; background: #edf8f4; color: #185f50; }
-.coaching-approach-options button.selected strong { background: #247260; color: #fff; }
+.coaching-approach-options button.selected strong { background: var(--color-primary); color: #fff; }
 .coaching-approach-options button.selected i { display: block; }
 .coaching-timeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; border: 1px solid #d8e2e8; border-radius: 9px; background: #fff; padding: 12px; }
 .coaching-timeline.coaching-timeline-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .coaching-timeline.group-activity-timeline { grid-template-columns: repeat(2, minmax(0, 1fr)); align-self: stretch; }
 .coaching-timeline-heading { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e8edf1; padding: 0 2px 10px; }
 .coaching-timeline-heading strong { color: #344054; font-size: 12px; }
-.coaching-timeline-heading span { color: #7a8798; font-size: 10px; font-weight: 700; }
+.coaching-timeline-heading span { color: var(--color-text-muted); font-size: 10px; font-weight: 700; }
 .coaching-timeline input { min-height: 42px; background: #fbfcfd; }
 .fixed-topic-cell { display: grid; gap: 10px; min-width: 280px; color: #172033; font-size: 12px; font-weight: 900; }
 .fixed-topic-cell label { display: grid; gap: 6px; color: #475467; font-size: 11px; font-weight: 900; }
 .fixed-topic-cell .table-textarea { min-width: 260px; min-height: 56px; }
 .checkbox-choice-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 150px; padding: 7px 2px; }
 .checkbox-choice-group label { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: #172033; font-size: 11px; font-weight: 800; white-space: nowrap; }
-.checkbox-choice-group input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; accent-color: #247260; }
+.checkbox-choice-group input { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; accent-color: var(--color-primary); }
 .multi-check-button { display: grid; place-items: center; width: 22px; height: 22px; margin: 0 auto; border: 1.5px solid #b8c7d9; border-radius: 5px; background: #fff; color: transparent; cursor: pointer; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
 .multi-check-button span { color: inherit; font-size: 14px; font-weight: 900; line-height: 1; }
-.multi-check-button.checked { border-color: #247260; background: #247260; color: #fff; box-shadow: 0 0 0 3px rgba(36, 114, 96, .14); }
+.multi-check-button.checked { border-color: var(--color-primary); background: var(--color-primary); color: #fff; box-shadow: 0 0 0 3px rgba(117, 41, 45, .14); }
 .row-number { width: 42px; text-align: center !important; }
 .row-control { width: 62px; text-align: center; }
 .row-control button { border: 1px solid #efb8b8; border-radius: 5px; background: #fff; color: #b42318; padding: 7px 9px; font-size: 11px; font-weight: 900; }
@@ -2118,37 +2189,37 @@ select:disabled { cursor: not-allowed; }
 .approach-modal-header h3, .approach-modal-header p { margin: 0; }
 .approach-modal-header h3 { color: #172033; font-size: 22px; font-weight: 900; }
 .approach-modal-header p { margin-top: 4px; color: #667085; font-size: 14px; font-weight: 800; }
-.approach-modal-badge { border: 1px solid #b9ddd4; border-radius: 999px; background: #edf8f5; color: #247260; padding: 8px 13px; font-size: 13px; font-weight: 900; white-space: nowrap; }
+.approach-modal-badge { border: 1px solid var(--color-primary-border); border-radius: 999px; background: var(--color-primary-soft); color: var(--color-primary); padding: 8px 13px; font-size: 13px; font-weight: 900; white-space: nowrap; }
 .approach-modal-header button { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid #efb8b8; border-radius: 7px; background: #fff; color: #b42318; font-size: 26px; font-weight: 600; line-height: 1; cursor: pointer; }
 .approach-modal-guide { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #d8e0e9; background: #f7fbfa; padding: 10px 18px; color: #46576b; font-size: 14px; font-weight: 800; }
-.approach-modal-guide strong { color: #247260; }
+.approach-modal-guide strong { color: var(--color-primary); }
 .approach-modal-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-x: hidden; overflow-y: scroll; overscroll-behavior: contain; background: #eef3f6; padding: 14px 18px 18px; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
 .approach-help-card { display: block; flex: 0 0 auto; border: 1px solid #d8e0e9; border-radius: 10px; background: #fff; overflow: visible; }
 .approach-help-card header { display: flex; align-items: flex-start; gap: 12px; border-bottom: 1px solid #dfe6ee; background: #f8fafc; padding: 14px 16px; }
-.approach-help-card header b { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: #247260; color: #fff; font-size: 15px; flex: 0 0 auto; box-shadow: 0 8px 18px rgba(36, 114, 96, .18); }
+.approach-help-card header b { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--color-primary); color: #fff; font-size: 15px; flex: 0 0 auto; box-shadow: 0 8px 18px rgba(117, 41, 45, .14); }
 .approach-help-card header strong, .approach-help-card header span { display: block; }
 .approach-help-card header strong { color: #172033; font-size: 17px; font-weight: 900; }
 .approach-help-card header span { margin-top: 5px; color: #667085; font-size: 14px; font-weight: 800; line-height: 1.4; }
 .approach-help-card ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 30px; margin: 0; padding: 18px 32px 22px 46px; color: #344054; font-size: 14px; line-height: 1.6; list-style: none; }
 .approach-help-card li { position: relative; margin: 0; padding-left: 18px; }
-.approach-help-card li::before { content: ''; position: absolute; top: .68em; left: 0; width: 7px; height: 7px; border-radius: 50%; background: #247260; transform: translateY(-50%); }
+.approach-help-card li::before { content: ''; position: absolute; top: .68em; left: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--color-primary); transform: translateY(-50%); }
 .approach-help-card.approach-b header b { background: #315f9f; box-shadow: 0 8px 18px rgba(49, 95, 159, .18); }
 .approach-help-card.approach-c header b { background: #8a5b18; box-shadow: 0 8px 18px rgba(138, 91, 24, .18); }
 .approach-help-card.approach-d header b { background: #8a3a4f; box-shadow: 0 8px 18px rgba(138, 58, 79, .18); }
 .approach-modal-footer { display: flex; justify-content: flex-end; border-top: 1px solid #d8e0e9; background: #fff; padding: 9px 14px; }
-.approach-modal-footer button { border: 1px solid #247260; border-radius: 7px; background: #247260; color: #fff; padding: 10px 20px; font-size: 14px; font-weight: 900; cursor: pointer; }
+.approach-modal-footer button { border: 1px solid var(--color-primary); border-radius: 7px; background: var(--color-primary); color: #fff; padding: 10px 20px; font-size: 14px; font-weight: 900; cursor: pointer; }
 .form-modal-footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #d8e0e9; background: #fff; padding: 13px 18px; }
 .form-save-error { align-self: center; margin-right: auto; color: #b42318; font-size: 13px; font-weight: 800; }
 .form-modal-footer button { border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; padding: 10px 14px; font-size: 12px; font-weight: 900; cursor: pointer; }
-.form-modal-footer button.primary { border-color: #247260; background: #247260; color: #fff; }
+.form-modal-footer button.primary { border-color: var(--color-primary); background: var(--color-primary); color: #fff; }
 .form-modal-footer button:disabled { border-color: #cbd5e1; background: #aab5c2; color: #fff; cursor: not-allowed; }
 .submit-bar { position: sticky; bottom: 0; z-index: 5; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 13px 16px; border: 1px solid #d7dfe8; border-radius: 8px; background: rgba(255,255,255,.96); box-shadow: 0 -8px 22px rgba(23,32,51,.08); }
 .submit-bar strong, .submit-bar span { display: block; }
 .submit-bar strong { font-size: 13px; }
-.submit-bar span { margin-top: 3px; color: #7a8798; font-size: 11px; }
+.submit-bar span { margin-top: 3px; color: var(--color-text-muted); font-size: 11px; }
 .submit-bar .submit-reason { color: #b42318; font-size: 12px; font-weight: 800; }
-.submit-bar .submit-ready { color: #247260; font-size: 12px; font-weight: 800; }
-.submit-bar button { min-width: 180px; border: 0; border-radius: 6px; background: #247260; padding: 11px 16px; color: #fff; font-size: 12px; font-weight: 900; cursor: pointer; }
+.submit-bar .submit-ready { color: var(--color-success); font-size: 12px; font-weight: 800; }
+.submit-bar button { min-width: 180px; border: 0; border-radius: 6px; background: var(--color-primary); padding: 11px 16px; color: #fff; font-size: 12px; font-weight: 900; cursor: pointer; }
 .submit-bar button:disabled { background: #aab5c2; cursor: not-allowed; }
 @media (max-width: 900px) {
   .page-header, .competency-header, .submit-bar { align-items: stretch; flex-direction: column; }

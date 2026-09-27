@@ -30,7 +30,6 @@ class MockSsoController extends Controller
             ))
             ->values()
             ->map(fn (User $user) => [
-                'id' => $user->sso ?? (string) $user->id,
                 'db_id' => $user->id,
                 'name' => ($user->title ?? '') . $user->name,
                 'role' => $this->roleKeyForUser($user),
@@ -44,15 +43,11 @@ class MockSsoController extends Controller
 
     public function login(Request $request)
     {
-        $ssoId = $request->input('sso_id');
+        $data = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
 
-        $user = User::where('sso', $ssoId)
-            ->orWhere('id', $ssoId)
-            ->first();
-
-        if (! $user) {
-            return back()->withErrors(['sso_id' => 'ไม่พบ User นี้ในระบบ']);
-        }
+        $user = User::findOrFail((int) $data['user_id']);
 
         Auth::login($user);
 

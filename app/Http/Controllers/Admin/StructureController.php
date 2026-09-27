@@ -139,10 +139,17 @@ class StructureController extends Controller
             return $this->storeSupportPosition($request);
         }
 
-        $jobFamilyId = $this->jobFamilyId(
-            $request->string('job_family_name')->toString(),
-            $request->string('workline_name')->toString() ?: null
-        );
+        $worklineName = $request->string('workline_name')->toString() ?: null;
+        $jobFamilyName = $request->string('job_family_name')->toString() ?: 'ตำแหน่งสายสนับสนุน';
+        $jobFamilyId = $this->jobFamilyId($jobFamilyName, $worklineName);
+        if (! $jobFamilyId && $worklineName && $this->isSupportWorklineName($worklineName)) {
+            $jobFamilyId = DB::table('job_families')->insertGetId([
+                'workline_id' => $this->worklineId($worklineName),
+                'name' => $jobFamilyName,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
 
         $data = $request->validate([
             'workline_name' => ['nullable', 'string', 'exists:worklines,name'],
@@ -159,12 +166,16 @@ class StructureController extends Controller
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('positions', 'name')->where(fn ($query) => $query->where('job_family_id', $jobFamilyId)),
+                Rule::unique('positions', 'name')
+                    ->where(fn ($query) => $query
+                        ->where('job_family_id', $jobFamilyId)
+                        ->whereNull('support_unit_id')),
             ],
         ]);
 
         DB::table('positions')->insert([
             'job_family_id' => $jobFamilyId,
+            'support_unit_id' => null,
             'name' => $data['name'],
             'created_at' => now(),
             'updated_at' => now(),
@@ -183,6 +194,11 @@ class StructureController extends Controller
             $request->string('job_family_name')->toString(),
             $request->string('workline_name')->toString() ?: null
         );
+        $positionId = DB::table('positions')
+            ->where('job_family_id', $jobFamilyId)
+            ->whereNull('support_unit_id')
+            ->where('name', $request->old_name)
+            ->value('id');
 
         $data = $request->validate([
             'workline_name' => ['nullable', 'string', 'exists:worklines,name'],
@@ -196,11 +212,21 @@ class StructureController extends Controller
                 ),
             ],
             'old_name' => ['required', 'string'],
-            'name' => ['required', 'string', 'max:255'],
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('positions', 'name')
+                    ->where(fn ($query) => $query
+                        ->where('job_family_id', $jobFamilyId)
+                        ->whereNull('support_unit_id'))
+                    ->ignore($positionId),
+            ],
         ]);
 
         DB::table('positions')
             ->where('job_family_id', $jobFamilyId)
+            ->whereNull('support_unit_id')
             ->where('name', $data['old_name'])
             ->update(['name' => $data['name'], 'updated_at' => now()]);
 
@@ -241,6 +267,7 @@ class StructureController extends Controller
 
         DB::table('positions')
             ->where('job_family_id', $jobFamilyId)
+            ->whereNull('support_unit_id')
             ->where('name', $data['name'])
             ->delete();
 
@@ -589,6 +616,11 @@ class StructureController extends Controller
         return DB::table('worklines')->where('name', $name)->value('id');
     }
 
+    private function isSupportWorklineName(string $name): bool
+    {
+        return in_array($name, ['สายสนับสนุน', 'สายงานสนับสนุน'], true);
+    }
+
     private function syncUserWorklineName(string $oldName, string $newName): void
     {
         DB::table('users')
@@ -731,9 +763,32 @@ class StructureController extends Controller
 
         DB::table('positions')->where('support_unit_id', $unitId)->where('name', $data['old_name'])
             ->update(['name' => $data['name'], 'updated_at' => now()]);
-        $this->syncUserPositionName('สายสนับสนุน', $data['division_name'], $data['old_name'], $data['name']);
+        $this->syncUserSupportPositionName(
+            $data['division_name'],
+            $data['work_name'],
+            $data['unit_name'],
+            $data['old_name'],
+            $data['name'],
+        );
 
         return back()->with('success', 'อัปเดตตำแหน่งเรียบร้อยแล้ว');
+    }
+
+    private function syncUserSupportPositionName(
+        string $divisionName,
+        string $workName,
+        string $unitName,
+        string $oldName,
+        string $newName,
+    ): void {
+        DB::table('users')
+            ->whereIn('workline', ['สายสนับสนุน', 'สายงานสนับสนุน'])
+            ->where('department', implode(' > ', [$divisionName, $workName, $unitName]))
+            ->where('position', $oldName)
+            ->update([
+                'position' => $newName,
+                'updated_at' => now(),
+            ]);
     }
 
     private function destroySupportPosition(Request $request): RedirectResponse

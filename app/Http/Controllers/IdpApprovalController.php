@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Services\IdpItemReviewWorkflow;
+use App\Services\NotificationService;
 use App\Services\ReviewerChainResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -15,6 +17,7 @@ class IdpApprovalController extends Controller
     public function __construct(
         private readonly IdpItemReviewWorkflow $reviewWorkflow,
         private readonly ReviewerChainResolver $reviewerChainResolver,
+        private readonly NotificationService $notifications,
     ) {
     }
 
@@ -59,7 +62,9 @@ class IdpApprovalController extends Controller
             'comment' => ['nullable', 'string'],
         ]);
 
-        DB::transaction(function () use ($validated): void {
+        $notification = null;
+
+        DB::transaction(function () use ($validated, &$notification): void {
             $item = $this->reviewableItem((int) $validated['idpItemId']);
             $step = (int) $item->current_review_step;
             $now = now();
@@ -75,9 +80,13 @@ class IdpApprovalController extends Controller
             );
 
             $nextStep = $this->reviewWorkflow->nextStep($item, $step);
+            $newStatus = $nextStep
+                ? $this->reviewWorkflow->statusForStep($nextStep)
+                : 'approved';
+
             DB::table('idp_items')->where('id', $item->id)->update($nextStep
                 ? [
-                    'status' => $this->reviewWorkflow->statusForStep($nextStep),
+                    'status' => $newStatus,
                     'current_review_step' => $nextStep,
                     'updated_at' => $now,
                 ]
@@ -93,7 +102,16 @@ class IdpApprovalController extends Controller
                 ]);
 
             $this->reviewWorkflow->syncParentStatus((int) $item->idp_id);
+
+            $notification = [
+                'employee_id' => (int) $item->user_id,
+                'item_id' => (int) $item->id,
+                'status' => $newStatus,
+                'next_step' => $nextStep ? (int) $nextStep : null,
+            ];
         });
+
+        $this->sendApprovalNotifications($notification);
 
         return back()->with('success', 'อนุมัติแผนสมรรถนะแล้ว');
     }
@@ -105,7 +123,9 @@ class IdpApprovalController extends Controller
             'comment' => ['required', 'string'],
         ]);
 
-        DB::transaction(function () use ($validated): void {
+        $notification = null;
+
+        DB::transaction(function () use ($validated, &$notification): void {
             $item = $this->reviewableItem((int) $validated['idpItemId']);
             $step = (int) $item->current_review_step;
             $comment = trim($validated['comment']);
@@ -125,9 +145,63 @@ class IdpApprovalController extends Controller
             ]);
 
             $this->reviewWorkflow->syncParentStatus((int) $item->idp_id);
+
+            $notification = [
+                'employee_id' => (int) $item->user_id,
+                'item_id' => (int) $item->id,
+                'status' => 'revision_required',
+                'reject_comment' => $comment,
+            ];
         });
 
+        $this->sendRejectionNotification($notification);
+
         return back()->with('success', 'ส่งกลับแผนสมรรถนะให้แก้ไขแล้ว');
+    }
+
+    private function sendApprovalNotifications(?array $notification): void
+    {
+        if (! $notification) {
+            return;
+        }
+
+        $employee = User::find((int) $notification['employee_id']);
+        if (! $employee) {
+            return;
+        }
+
+        $this->notifications->notifyEmployeeIdpStatusUpdate(
+            $employee,
+            (int) $notification['item_id'],
+            (string) $notification['status'],
+        );
+
+        if ($notification['next_step']) {
+            $this->notifications->notifyIdpReviewerForItem(
+                $employee,
+                (int) $notification['item_id'],
+                (int) $notification['next_step'],
+            );
+        }
+    }
+
+    private function sendRejectionNotification(?array $notification): void
+    {
+        if (! $notification) {
+            return;
+        }
+
+        $employee = User::find((int) $notification['employee_id']);
+        if (! $employee) {
+            return;
+        }
+
+        $this->notifications->notifyEmployeeIdpStatusUpdate(
+            $employee,
+            (int) $notification['item_id'],
+            (string) $notification['status'],
+            (string) $notification['reject_comment'],
+        );
     }
 
     private function reviewableItem(int $itemId): object
