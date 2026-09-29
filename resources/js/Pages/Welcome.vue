@@ -1,6 +1,21 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 
+defineProps({
+    ssoEnabled: {
+        type: Boolean,
+        default: false,
+    },
+    ssoError: {
+        type: String,
+        default: null,
+    },
+});
+
+const loginWithKkuSso = () => {
+    window.location.href = route('auth.kku.redirect');
+};
+
 const loginWithPassword = () => {
     window.location.href = route('login');
 };
@@ -53,7 +68,13 @@ const loginWithPassword = () => {
             <p class="subtitle">Competency &amp; Individual Development Plan Management System</p>
 
             <div class="login-actions">
-                <button class="login-button" type="button" disabled aria-disabled="true">
+                <button
+                    class="login-button"
+                    type="button"
+                    :disabled="!ssoEnabled"
+                    :aria-disabled="!ssoEnabled"
+                    @click="loginWithKkuSso"
+                >
                     <span class="login-icon" aria-hidden="true">
                         <span></span>
                     </span>
@@ -63,6 +84,8 @@ const loginWithPassword = () => {
                 <button class="alternative-login-button" type="button" @click="loginWithPassword">
                     หรือ เข้าสู่ระบบด้วยวิธีอื่น
                 </button>
+
+                <p v-if="ssoError" class="login-error" role="alert">{{ ssoError }}</p>
             </div>
 
             <div class="support-row">
@@ -354,6 +377,17 @@ const loginWithPassword = () => {
 .alternative-login-button:focus-visible {
     outline: 3px solid rgba(255, 255, 255, 0.7);
     outline-offset: 4px;
+}
+
+.login-error {
+    margin: 0;
+    border: 1px solid rgba(255, 198, 198, 0.72);
+    border-radius: 6px;
+    background: rgba(111, 24, 30, 0.86);
+    color: #ffffff;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 10px 14px;
 }
 
 .login-icon::before {

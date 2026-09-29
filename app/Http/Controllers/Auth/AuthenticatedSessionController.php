@@ -51,11 +51,21 @@ class AuthenticatedSessionController extends Controller
      */
     public function destroy(Request $request): RedirectResponse
     {
+        $wasKkuSsoLogin = (bool) $request->session()->get('kku_sso_authenticated', false);
+
         Auth::guard('web')->logout();
 
         $request->session()->invalidate();
 
         $request->session()->regenerateToken();
+
+        if ($wasKkuSsoLogin && filled(config('services.kku_sso.app_id'))) {
+            $logoutUrl = config('services.kku_sso.logout_url').'?'.http_build_query([
+                'app' => config('services.kku_sso.app_id'),
+            ]);
+
+            return redirect()->away($logoutUrl);
+        }
 
         return redirect('/');
     }

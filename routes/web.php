@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\ReviewerChainTemplateController as AdminReviewerC
 use App\Http\Controllers\Admin\StructureController as AdminStructureController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\AssessmentController;
+use App\Http\Controllers\Auth\KkuSsoController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Employee\FcTopicSelectionController as EmployeeFcTopicSelectionController;
 use App\Http\Controllers\Employee\IdpActivityUpdateController;
@@ -27,10 +28,24 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
+    $ssoEnabled = (bool) config('services.kku_sso.enabled')
+        && filled(config('services.kku_sso.app_id'))
+        && filled(config('services.kku_sso.client_id'))
+        && filled(config('services.kku_sso.client_secret'));
+
     return Inertia::render('Welcome', [
         'pageTitle' => 'เข้าสู่ระบบ',
+        'ssoEnabled' => $ssoEnabled,
+        'ssoError' => session('sso_error'),
     ]);
 });
+
+Route::get('/auth/kku', [KkuSsoController::class, 'redirect'])
+    ->middleware('throttle:20,1')
+    ->name('auth.kku.redirect');
+Route::get('/auth/kku/callback', [KkuSsoController::class, 'callback'])
+    ->middleware('throttle:20,1')
+    ->name('auth.kku.callback');
 
 Route::get('/dashboard', [DashboardController::class, 'index'])
     ->middleware(['auth', 'active', 'verified'])
