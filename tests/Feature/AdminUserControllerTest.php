@@ -332,6 +332,42 @@ class AdminUserControllerTest extends TestCase
         ]);
     }
 
+    public function test_admin_edit_maps_user_to_level_matching_current_level_name(): void
+    {
+        $admin = User::factory()->create(['role_id' => $this->roleId('admin')]);
+        $worklineId = DB::table('worklines')->insertGetId(['name' => 'academic-test', 'created_at' => now(), 'updated_at' => now()]);
+        $jobFamilyId = DB::table('job_families')->insertGetId([
+            'workline_id' => $worklineId, 'name' => 'faculty-test', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $positionId = DB::table('positions')->insertGetId([
+            'job_family_id' => $jobFamilyId, 'name' => 'position-test', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $configuredLevelId = DB::table('levels')->insertGetId([
+            'workline_id' => $worklineId, 'job_family_id' => null, 'name' => 'rank-test', 'expected_level' => 3,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $mismatchedLevelId = DB::table('levels')->insertGetId([
+            'workline_id' => $worklineId, 'job_family_id' => null, 'name' => 'older-rank', 'expected_level' => 1,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $user = User::factory()->create([
+            'sso' => 'employee-level-mapping', 'username' => 'employee.level.mapping', 'role_id' => $this->roleId('employee'),
+            'workline' => 'academic-test', 'department' => 'faculty-test', 'position' => 'position-test',
+            'level' => 'rank-test', 'position_id' => $positionId, 'level_id' => $mismatchedLevelId,
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('admin.users.update', $user), [
+                'sso' => 'employee-level-mapping', 'username' => 'employee.level.mapping', 'r' => 'employee',
+                'fn' => 'Staff', 'ln' => 'Member', 'em' => 'employee.level.mapping@example.com',
+                'preserve_existing_structure' => true,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $this->assertSame($configuredLevelId, (int) $user->fresh()->level_id);
+    }
+
     public function test_admin_can_update_three_assessment_reviewer_steps(): void
     {
         $admin = User::factory()->create(['role_id' => $this->roleId('admin')]);

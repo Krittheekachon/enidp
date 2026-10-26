@@ -211,7 +211,7 @@ class UserController extends Controller
             $data['p'] = $user->position;
             $data['l'] = $user->level;
             $data['_position_id'] = $user->position_id;
-            $data['_level_id'] = $user->level_id;
+            $data['_level_id'] = $this->canonicalLevelIdForUser($user) ?? $user->level_id;
         } elseif ($this->normalizeRoleKey((string) $data['r']) === 'admin') {
             $data['w'] = $data['d'] = $data['p'] = $data['l'] = null;
             $data['_position_id'] = null;
@@ -572,6 +572,25 @@ class UserController extends Controller
         }
 
         return (int) $levelId;
+    }
+
+    private function canonicalLevelIdForUser(User $user): ?int
+    {
+        if (blank($user->workline) || blank($user->level)) {
+            return null;
+        }
+
+        $worklineId = DB::table('worklines')->where('name', trim((string) $user->workline))->value('id');
+        if (! $worklineId) {
+            return null;
+        }
+
+        return DB::table('levels')
+            ->where('workline_id', $worklineId)
+            ->whereRaw('LOWER(TRIM(name)) = LOWER(TRIM(?))', [(string) $user->level])
+            ->whereNull('job_family_id')
+            ->orderBy('id')
+            ->value('id');
     }
 
     private function positionIdForJobFamily(int $jobFamilyId, string $positionName): ?int
